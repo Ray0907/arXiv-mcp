@@ -19,7 +19,7 @@ A Model Context Protocol server that provides arXiv paper search and retrieval c
 
 ```bash
 cd mcp-arxiv
-sourve .venv/bin/activate
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
