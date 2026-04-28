@@ -21,6 +21,7 @@ mcp = FastMCP("arXiv-server")
 URL_BASE = "https://arxiv.org"
 URL_EXPORT = "https://export.arxiv.org"
 URL_JINA = "https://r.jina.ai"
+_ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
 
 
@@ -346,11 +347,12 @@ def getContent(id_or_url: str) -> str:
 		Full text content of the paper in markdown format
 	"""
 	id_arxiv = extractPaperId(id_or_url)
-	if not id_arxiv:
-		# Try using the URL directly
-		url_target = id_or_url if id_or_url.startswith("http") else f"{URL_BASE}/abs/{id_or_url}"
+	if id_or_url.startswith("https://") and not id_arxiv:
+		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
+			raise ValueError(f"URL must point to arxiv.org, got: {id_or_url}")
+		url_target = id_or_url
 	else:
-		url_target = f"{URL_BASE}/abs/{id_arxiv}"
+		url_target = f"{URL_BASE}/abs/{id_arxiv or id_or_url}"
 
 	jina_url = f"{URL_JINA}/{url_target}"
 
