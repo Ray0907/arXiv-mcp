@@ -26,7 +26,7 @@ Search arXiv for papers matching a query.
 | `page` | int | No | Page number (default: 1) |
 | `page_size` | int | No | Results per page, max 50 (default: 25) |
 
-### `searchAdvanced`
+### `search_advanced`
 Advanced search with specific field filters.
 
 | Argument | Type | Required | Description |
@@ -42,21 +42,21 @@ Advanced search with specific field filters.
 | `page` | int | No | Page number |
 | `page_size` | int | No | Results per page |
 
-### `getPaper`
+### `get_paper`
 Get detailed information about a specific arXiv paper.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `id_or_url` | string | Yes | arXiv ID (e.g., '2301.00001') or full URL |
 
-### `getContent`
+### `get_content`
 Get the full text content of an arXiv paper using Jina Reader.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `id_or_url` | string | Yes | arXiv ID or full URL |
 
-### `getRecent`
+### `get_recent`
 Get recent papers from a specific arXiv category.
 
 | Argument | Type | Required | Description |
@@ -64,7 +64,7 @@ Get recent papers from a specific arXiv category.
 | `category` | string | No | Category code (default: 'cs.AI') |
 | `count` | int | No | Number of papers, max 50 (default: 10) |
 
-### `listCategories`
+### `list_categories`
 List all common arXiv categories with their codes and names.
 
 ## Installation
@@ -188,9 +188,25 @@ uv run arxiv-mcp
 | cs.NE | Neural and Evolutionary Computing |
 | stat.ML | Machine Learning (Statistics) |
 
-Use `listCategories` tool to get the full list.
+Use `list_categories` tool to get the full list.
 
 ## Changelog
+
+### v0.3.0
+
+**Breaking Changes:**
+- Renamed all tools to snake_case: `search_advanced`, `get_paper`, `get_content`, `get_recent`, `list_categories`
+  (existing client configurations referencing camelCase names must be updated)
+
+**Security:**
+- Fixed SSRF bypass in `get_content`: non-arxiv.org URLs containing a valid arXiv ID in the path (e.g. `https://evil.com/abs/2301.00001`) are now correctly rejected
+
+**Improvements:**
+- All tools are now `async def` using `httpx.AsyncClient`
+- HTTP errors return `{"error": "..."}` dicts instead of raising exceptions, so the LLM can read and retry
+- All tools annotated with `readOnlyHint: true` and `openWorldHint: true`
+- `SearchResult` now includes `has_more: bool` and `next_page: int | null` for easier pagination
+- `list_categories` pre-computes the category list at import time instead of on every call
 
 ### v0.2.0
 
