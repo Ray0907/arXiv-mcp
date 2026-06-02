@@ -1,7 +1,7 @@
 """Data models for arXiv MCP server."""
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Paper(BaseModel):
@@ -26,6 +26,17 @@ class SearchResult(BaseModel):
 	papers: list[Paper] = Field(description="List of papers")
 	page: int = Field(default=1, description="Current page number")
 	page_size: int = Field(default=25, description="Number of results per page")
+	has_more: bool = Field(default=False, description="Whether more results exist")
+	next_page: Optional[int] = Field(
+		default=None, description="Next page number if has_more is True"
+	)
+
+	@model_validator(mode="after")
+	def compute_pagination(self) -> "SearchResult":
+		end = self.page * self.page_size
+		self.has_more = self.total_results > end
+		self.next_page = self.page + 1 if self.has_more else None
+		return self
 
 
 class Category(BaseModel):

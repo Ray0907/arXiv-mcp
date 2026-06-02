@@ -25,7 +25,7 @@ _ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
 
 
-def extractPaperId(url: str) -> Optional[str]:
+def extract_paper_id(url: str) -> Optional[str]:
 	"""Extract arXiv paper ID from URL or return ID if already in ID format."""
 	patterns = [
 		r"arxiv\.org/abs/(\d+\.\d+)",
@@ -39,14 +39,14 @@ def extractPaperId(url: str) -> Optional[str]:
 	return None
 
 
-def cleanText(text: str) -> str:
+def clean_text(text: str) -> str:
 	"""Clean and normalize text content."""
 	text = text.replace("\n", " ")
 	text = " ".join(text.split())
 	return text.strip()
 
 
-def parseSearchResults(html: str, query: str, page: int, page_size: int) -> SearchResult:
+def parse_search_results(html: str, query: str, page: int, page_size: int) -> SearchResult:
 	"""Parse arXiv search results HTML into structured data."""
 	soup = BeautifulSoup(html, "html.parser")
 	items = soup.select(".arxiv-result")
@@ -64,13 +64,13 @@ def parseSearchResults(html: str, query: str, page: int, page_size: int) -> Sear
 		try:
 			# Extract title
 			title_elem = item.select_one(".title")
-			title = cleanText(title_elem.text) if title_elem else "Unknown Title"
+			title = clean_text(title_elem.text) if title_elem else "Unknown Title"
 
 			# Extract abstract
 			abstract_elem = item.select_one(".abstract-full")
 			if not abstract_elem:
 				abstract_elem = item.select_one(".abstract")
-			abstract = cleanText(abstract_elem.text) if abstract_elem else ""
+			abstract = clean_text(abstract_elem.text) if abstract_elem else ""
 			# Remove "Less" or "More" button text
 			abstract = re.sub(r"\s*(Less|More)\s*$", "", abstract)
 			abstract = re.sub(r"^Abstract:\s*", "", abstract)
@@ -78,7 +78,7 @@ def parseSearchResults(html: str, query: str, page: int, page_size: int) -> Sear
 			# Extract URL and ID
 			url_elem = item.select_one(".list-title > span > a")
 			url_abstract = url_elem.get("href") if url_elem else ""
-			id_arxiv = extractPaperId(url_abstract) or ""
+			id_arxiv = extract_paper_id(url_abstract) or ""
 
 			# Extract authors
 			authors = []
@@ -178,12 +178,12 @@ def search(
 		response = client.get(url)
 		response.raise_for_status()
 
-	result = parseSearchResults(response.text, full_query, page, page_size)
+	result = parse_search_results(response.text, full_query, page, page_size)
 	return result.model_dump()
 
 
 @mcp.tool()
-def searchAdvanced(
+def search_advanced(
 	title: Optional[str] = None,
 	abstract: Optional[str] = None,
 	author: Optional[str] = None,
@@ -256,12 +256,12 @@ def searchAdvanced(
 		response = client.get(url)
 		response.raise_for_status()
 
-	result = parseSearchResults(response.text, full_query, page, page_size)
+	result = parse_search_results(response.text, full_query, page, page_size)
 	return result.model_dump()
 
 
 @mcp.tool()
-def getPaper(id_or_url: str) -> dict:
+def get_paper(id_or_url: str) -> dict:
 	"""
 	Get detailed information about a specific arXiv paper.
 
@@ -271,7 +271,7 @@ def getPaper(id_or_url: str) -> dict:
 	Returns:
 		Paper details including title, abstract, authors, categories, and URLs
 	"""
-	id_arxiv = extractPaperId(id_or_url)
+	id_arxiv = extract_paper_id(id_or_url)
 	if not id_arxiv:
 		return {"error": f"Could not extract arXiv ID from: {id_or_url}"}
 
@@ -285,11 +285,11 @@ def getPaper(id_or_url: str) -> dict:
 
 	# Extract title
 	title_elem = soup.select_one(".title.mathjax")
-	title = cleanText(title_elem.text.replace("Title:", "")) if title_elem else "Unknown"
+	title = clean_text(title_elem.text.replace("Title:", "")) if title_elem else "Unknown"
 
 	# Extract abstract
 	abstract_elem = soup.select_one(".abstract.mathjax")
-	abstract = cleanText(abstract_elem.text.replace("Abstract:", "")) if abstract_elem else ""
+	abstract = clean_text(abstract_elem.text.replace("Abstract:", "")) if abstract_elem else ""
 
 	# Extract authors
 	authors = []
@@ -336,7 +336,7 @@ def getPaper(id_or_url: str) -> dict:
 
 
 @mcp.tool()
-def getContent(id_or_url: str) -> str:
+def get_content(id_or_url: str) -> str:
 	"""
 	Get the full text content of an arXiv paper using Jina Reader.
 
@@ -346,7 +346,7 @@ def getContent(id_or_url: str) -> str:
 	Returns:
 		Full text content of the paper in markdown format
 	"""
-	id_arxiv = extractPaperId(id_or_url)
+	id_arxiv = extract_paper_id(id_or_url)
 	if id_or_url.startswith("https://") and not id_arxiv:
 		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
 			raise ValueError(f"URL must point to arxiv.org, got: {id_or_url}")
@@ -365,7 +365,7 @@ def getContent(id_or_url: str) -> str:
 
 @mcp.tool()
 @lru_cache(maxsize=1)
-def listCategories() -> list[dict]:
+def list_categories() -> list[dict]:
 	"""
 	List all common arXiv categories.
 
@@ -396,7 +396,7 @@ def listCategories() -> list[dict]:
 
 
 @mcp.tool()
-def getRecent(category: str = "cs.AI", count: int = 10) -> dict:
+def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 	"""
 	Get recent papers from a specific arXiv category.
 
@@ -437,7 +437,7 @@ def getRecent(category: str = "cs.AI", count: int = 10) -> dict:
 
 			# Extract title
 			title_elem = dd.select_one(".list-title")
-			title = cleanText(title_elem.text.replace("Title:", "")) if title_elem else ""
+			title = clean_text(title_elem.text.replace("Title:", "")) if title_elem else ""
 
 			# Extract authors
 			authors = []
