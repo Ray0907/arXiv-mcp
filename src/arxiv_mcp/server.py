@@ -379,17 +379,9 @@ async def get_content(id_or_url: str) -> str:
 	return response.text
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def list_categories() -> list[dict]:
-	"""
-	List all common arXiv categories.
-
-	Returns:
-		List of arXiv categories with code, name, and group
-	"""
+def _build_categories() -> list[dict]:
 	categories = []
 	for code, name in ARXIV_CATEGORIES.items():
-		# Determine group from code prefix
 		if code.startswith("cs."):
 			group = "Computer Science"
 		elif code.startswith("stat."):
@@ -404,10 +396,22 @@ async def list_categories() -> list[dict]:
 			group = "Quantitative Finance"
 		else:
 			group = "Physics"
-
 		categories.append({"code": code, "name": name, "group": group})
-
 	return sorted(categories, key=lambda x: (x["group"], x["code"]))
+
+
+_CATEGORIES_CACHE: list[dict] = _build_categories()
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def list_categories() -> list[dict]:
+	"""
+	List all common arXiv categories.
+
+	Returns:
+		List of arXiv categories with code, name, and group
+	"""
+	return _CATEGORIES_CACHE
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})

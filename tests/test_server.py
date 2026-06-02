@@ -51,6 +51,25 @@ def test_get_paper_is_async():
     assert inspect.iscoroutinefunction(get_paper)
 
 
+def test_list_categories_precomputed():
+    """Categories are pre-computed at module load, not inside the tool call."""
+    from arxiv_mcp.server import _CATEGORIES_CACHE, list_categories
+    import asyncio
+    # Module-level constant should already be populated
+    assert len(_CATEGORIES_CACHE) > 0
+    assert all('code' in c and 'name' in c and 'group' in c for c in _CATEGORIES_CACHE)
+    # Tool returns the same list
+    result = asyncio.run(list_categories())
+    assert result == _CATEGORIES_CACHE
+    # Sorted by (group, code)
+    groups = [c['group'] for c in result]
+    codes_by_group: dict = {}
+    for c in result:
+        codes_by_group.setdefault(c['group'], []).append(c['code'])
+    for g, codes in codes_by_group.items():
+        assert codes == sorted(codes), f'Group {g} not sorted: {codes}'
+
+
 @pytest.mark.asyncio
 async def test_search_returns_error_on_http_failure(monkeypatch):
     from arxiv_mcp.server import search
