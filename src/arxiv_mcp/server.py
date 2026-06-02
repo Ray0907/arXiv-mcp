@@ -2,7 +2,6 @@
 
 import re
 import urllib.parse
-from functools import lru_cache
 from typing import Optional
 
 import httpx
@@ -23,6 +22,11 @@ URL_EXPORT = "https://export.arxiv.org"
 URL_JINA = "https://r.jina.ai"
 _ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
+
+
+def _http_error_response(exc):
+	code = exc.response.status_code
+	return {"error": f"arXiv returned HTTP {code}. Try adjusting your query or try again later."}
 
 
 def extract_paper_id(url: str) -> Optional[str]:
@@ -130,7 +134,7 @@ def parse_search_results(html: str, query: str, page: int, page_size: int) -> Se
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-def search(
+async def search(
 	query: str,
 	category: Optional[str] = None,
 	author: Optional[str] = None,
@@ -174,16 +178,19 @@ def search(
 		f"&order={sort_order}&size={page_size}&start={start}"
 	)
 
-	with httpx.Client(timeout=TIMEOUT) as client:
-		response = client.get(url)
-		response.raise_for_status()
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+			response = await client.get(url)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		return _http_error_response(exc)
 
 	result = parse_search_results(response.text, full_query, page, page_size)
 	return result.model_dump()
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-def search_advanced(
+async def search_advanced(
 	title: Optional[str] = None,
 	abstract: Optional[str] = None,
 	author: Optional[str] = None,
@@ -252,16 +259,19 @@ def search_advanced(
 	if date_to:
 		url += f"&date-to_date={date_to}"
 
-	with httpx.Client(timeout=TIMEOUT) as client:
-		response = client.get(url)
-		response.raise_for_status()
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+			response = await client.get(url)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		return _http_error_response(exc)
 
 	result = parse_search_results(response.text, full_query, page, page_size)
 	return result.model_dump()
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-def get_paper(id_or_url: str) -> dict:
+async def get_paper(id_or_url: str) -> dict:
 	"""
 	Get detailed information about a specific arXiv paper.
 
@@ -277,9 +287,12 @@ def get_paper(id_or_url: str) -> dict:
 
 	url_abstract = f"{URL_BASE}/abs/{id_arxiv}"
 
-	with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
-		response = client.get(url_abstract)
-		response.raise_for_status()
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+			response = await client.get(url_abstract)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		return _http_error_response(exc)
 
 	soup = BeautifulSoup(response.text, "html.parser")
 
@@ -336,7 +349,7 @@ def get_paper(id_or_url: str) -> dict:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-def get_content(id_or_url: str) -> str:
+async def get_content(id_or_url: str) -> str:
 	"""
 	Get the full text content of an arXiv paper using Jina Reader.
 
@@ -356,16 +369,18 @@ def get_content(id_or_url: str) -> str:
 
 	jina_url = f"{URL_JINA}/{url_target}"
 
-	with httpx.Client(timeout=TIMEOUT * 2) as client:
-		response = client.get(jina_url)
-		response.raise_for_status()
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT * 2) as client:
+			response = await client.get(jina_url)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		return f"Error fetching paper content: HTTP {exc.response.status_code}"
 
 	return response.text
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-@lru_cache(maxsize=1)
-def list_categories() -> list[dict]:
+async def list_categories() -> list[dict]:
 	"""
 	List all common arXiv categories.
 
@@ -396,7 +411,7 @@ def list_categories() -> list[dict]:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
+async def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 	"""
 	Get recent papers from a specific arXiv category.
 
@@ -410,9 +425,12 @@ def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 	count = min(count, 50)
 	url = f"{URL_BASE}/list/{category}/recent?skip=0&show={count}"
 
-	with httpx.Client(timeout=TIMEOUT, follow_redirects=True) as client:
-		response = client.get(url)
-		response.raise_for_status()
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+			response = await client.get(url)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		return _http_error_response(exc)
 
 	soup = BeautifulSoup(response.text, "html.parser")
 
