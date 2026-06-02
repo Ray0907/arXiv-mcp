@@ -34,3 +34,17 @@ def test_tools_registered():
     names = {t.name for t in tools}
     expected = {"search", "search_advanced", "get_paper", "get_content", "get_recent", "list_categories"}
     assert expected.issubset(names), f"Missing tools: {expected - names}"
+
+
+def test_get_content_rejects_non_arxiv_url():
+    from arxiv_mcp.server import get_content
+    import pytest
+    with pytest.raises(ValueError, match='must point to arxiv.org'):
+        get_content('https://evil.com/something')
+
+
+def test_get_content_rejects_evil_url_with_arxiv_id_in_path():
+    from arxiv_mcp.server import get_content
+    import pytest
+    with pytest.raises(ValueError, match='must point to arxiv.org'):
+        get_content('https://evil.com/abs/2301.00001')

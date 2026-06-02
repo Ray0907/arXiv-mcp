@@ -129,7 +129,7 @@ def parse_search_results(html: str, query: str, page: int, page_size: int) -> Se
 	)
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 def search(
 	query: str,
 	category: Optional[str] = None,
@@ -182,7 +182,7 @@ def search(
 	return result.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 def search_advanced(
 	title: Optional[str] = None,
 	abstract: Optional[str] = None,
@@ -260,7 +260,7 @@ def search_advanced(
 	return result.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 def get_paper(id_or_url: str) -> dict:
 	"""
 	Get detailed information about a specific arXiv paper.
@@ -335,7 +335,7 @@ def get_paper(id_or_url: str) -> dict:
 	return paper.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 def get_content(id_or_url: str) -> str:
 	"""
 	Get the full text content of an arXiv paper using Jina Reader.
@@ -346,13 +346,13 @@ def get_content(id_or_url: str) -> str:
 	Returns:
 		Full text content of the paper in markdown format
 	"""
-	id_arxiv = extract_paper_id(id_or_url)
-	if id_or_url.startswith("https://") and not id_arxiv:
+	if id_or_url.startswith('https://') or id_or_url.startswith('http://'):
 		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
-			raise ValueError(f"URL must point to arxiv.org, got: {id_or_url}")
+			raise ValueError(f'URL must point to arxiv.org, got: {id_or_url}')
 		url_target = id_or_url
 	else:
-		url_target = f"{URL_BASE}/abs/{id_arxiv or id_or_url}"
+		id_arxiv = extract_paper_id(id_or_url)
+		url_target = f'{URL_BASE}/abs/{id_arxiv or id_or_url}'
 
 	jina_url = f"{URL_JINA}/{url_target}"
 
@@ -363,7 +363,7 @@ def get_content(id_or_url: str) -> str:
 	return response.text
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 @lru_cache(maxsize=1)
 def list_categories() -> list[dict]:
 	"""
@@ -395,7 +395,7 @@ def list_categories() -> list[dict]:
 	return sorted(categories, key=lambda x: (x["group"], x["code"]))
 
 
-@mcp.tool()
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 	"""
 	Get recent papers from a specific arXiv category.
