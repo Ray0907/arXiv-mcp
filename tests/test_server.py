@@ -53,25 +53,25 @@ def test_get_paper_is_async():
 
 def test_list_categories_precomputed():
     """Categories are pre-computed at module load, not inside the tool call."""
+    from arxiv_mcp.models import Category
     from arxiv_mcp.server import _CATEGORIES_CACHE, list_categories
     import asyncio
     # Module-level constant should already be populated
     assert len(_CATEGORIES_CACHE) > 0
-    assert all('code' in c and 'name' in c and 'group' in c for c in _CATEGORIES_CACHE)
+    assert all(isinstance(c, Category) for c in _CATEGORIES_CACHE)
     # Tool returns the same list
     result = asyncio.run(list_categories())
     assert result == _CATEGORIES_CACHE
     # Sorted by (group, code)
-    groups = [c['group'] for c in result]
     codes_by_group: dict = {}
     for c in result:
-        codes_by_group.setdefault(c['group'], []).append(c['code'])
+        codes_by_group.setdefault(c.group, []).append(c.code)
     for g, codes in codes_by_group.items():
         assert codes == sorted(codes), f'Group {g} not sorted: {codes}'
 
 
 @pytest.mark.asyncio
-async def test_search_returns_error_on_http_failure(monkeypatch):
+async def test_search_raises_on_http_failure(monkeypatch):
     from arxiv_mcp.server import search
 
     request = httpx.Request("GET", "https://arxiv.org/search/")
@@ -93,10 +93,37 @@ async def test_search_returns_error_on_http_failure(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", MockAsyncClient)
 
-    result = await search("transformers")
+    with pytest.raises(ValueError, match="503"):
+        await search("transformers")
 
-    assert "error" in result
-    assert "503" in result["error"]
+
+@pytest.mark.asyncio
+async def test_search_advanced_requires_a_field():
+    from arxiv_mcp.server import search_advanced
+
+    with pytest.raises(ValueError, match="At least one search field"):
+        await search_advanced()
+
+
+@pytest.mark.asyncio
+async def test_tools_have_output_schema():
+    from arxiv_mcp.server import mcp
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    for name in ("search", "search_advanced", "get_paper", "get_recent", "list_categories"):
+        assert tools[name].output_schema, f"{name} missing output_schema"
+    assert "papers" in tools["search"].output_schema["properties"]
+    # Non-object return types are wrapped under a "result" key by the SDK
+    assert list(tools["list_categories"].output_schema["properties"]) == ["result"]
+
+
+@pytest.mark.asyncio
+async def test_list_categories_structured_content_wrapped():
+    from arxiv_mcp.server import mcp
+
+    result = await mcp.call_tool("list_categories", {})
+    assert set(result.structured_content) == {"result"}
+    assert result.structured_content["result"][0]["code"]
 
 
 @pytest.mark.asyncio

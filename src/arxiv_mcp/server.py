@@ -6,16 +6,18 @@ from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
+	Category,
 	Paper,
+	RecentPapers,
 	SearchResult,
 )
 
-mcp = FastMCP("arXiv-server")
+mcp = MCPServer("arXiv-server")
 
 URL_BASE = "https://arxiv.org"
 URL_EXPORT = "https://export.arxiv.org"
@@ -24,9 +26,9 @@ _ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
 
 
-def _http_error_response(exc):
+def _http_error(exc: httpx.HTTPStatusError) -> ValueError:
 	code = exc.response.status_code
-	return {"error": f"arXiv returned HTTP {code}. Try adjusting your query or try again later."}
+	return ValueError(f"arXiv returned HTTP {code}. Try adjusting your query or try again later.")
 
 
 def extract_paper_id(url: str) -> Optional[str]:
@@ -141,7 +143,7 @@ async def search(
 	sort_by: str = "relevance",
 	page: int = 1,
 	page_size: int = 25,
-) -> dict:
+) -> SearchResult:
 	"""
 	Search arXiv for papers matching the query.
 
@@ -183,10 +185,9 @@ async def search(
 			response = await client.get(url)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
-		return _http_error_response(exc)
+		raise _http_error(exc) from exc
 
-	result = parse_search_results(response.text, full_query, page, page_size)
-	return result.model_dump()
+	return parse_search_results(response.text, full_query, page, page_size)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -201,7 +202,7 @@ async def search_advanced(
 	sort_by: str = "relevance",
 	page: int = 1,
 	page_size: int = 25,
-) -> dict:
+) -> SearchResult:
 	"""
 	Advanced search with specific field filters.
 
@@ -237,7 +238,7 @@ async def search_advanced(
 		query_parts.append(f"id:{id_arxiv}")
 
 	if not query_parts:
-		return {"error": "At least one search field is required"}
+		raise ValueError("At least one search field is required")
 
 	full_query = " AND ".join(query_parts)
 	encoded_query = urllib.parse.quote_plus(full_query)
@@ -264,14 +265,13 @@ async def search_advanced(
 			response = await client.get(url)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
-		return _http_error_response(exc)
+		raise _http_error(exc) from exc
 
-	result = parse_search_results(response.text, full_query, page, page_size)
-	return result.model_dump()
+	return parse_search_results(response.text, full_query, page, page_size)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def get_paper(id_or_url: str) -> dict:
+async def get_paper(id_or_url: str) -> Paper:
 	"""
 	Get detailed information about a specific arXiv paper.
 
@@ -283,7 +283,7 @@ async def get_paper(id_or_url: str) -> dict:
 	"""
 	id_arxiv = extract_paper_id(id_or_url)
 	if not id_arxiv:
-		return {"error": f"Could not extract arXiv ID from: {id_or_url}"}
+		raise ValueError(f"Could not extract arXiv ID from: {id_or_url}")
 
 	url_abstract = f"{URL_BASE}/abs/{id_arxiv}"
 
@@ -292,7 +292,7 @@ async def get_paper(id_or_url: str) -> dict:
 			response = await client.get(url_abstract)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
-		return _http_error_response(exc)
+		raise _http_error(exc) from exc
 
 	soup = BeautifulSoup(response.text, "html.parser")
 
@@ -345,7 +345,7 @@ async def get_paper(id_or_url: str) -> dict:
 		date_published=date_submitted,
 	)
 
-	return paper.model_dump()
+	return paper
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -374,12 +374,12 @@ async def get_content(id_or_url: str) -> str:
 			response = await client.get(jina_url)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
-		return f"Error fetching paper content: HTTP {exc.response.status_code}"
+		raise _http_error(exc) from exc
 
 	return response.text
 
 
-def _build_categories() -> list[dict]:
+def _build_categories() -> list[Category]:
 	categories = []
 	for code, name in ARXIV_CATEGORIES.items():
 		if code.startswith("cs."):
@@ -396,15 +396,15 @@ def _build_categories() -> list[dict]:
 			group = "Quantitative Finance"
 		else:
 			group = "Physics"
-		categories.append({"code": code, "name": name, "group": group})
-	return sorted(categories, key=lambda x: (x["group"], x["code"]))
+		categories.append(Category(code=code, name=name, group=group))
+	return sorted(categories, key=lambda x: (x.group, x.code))
 
 
-_CATEGORIES_CACHE: list[dict] = _build_categories()
+_CATEGORIES_CACHE: list[Category] = _build_categories()
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def list_categories() -> list[dict]:
+async def list_categories() -> list[Category]:
 	"""
 	List all common arXiv categories.
 
@@ -415,7 +415,7 @@ async def list_categories() -> list[dict]:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
+async def get_recent(category: str = "cs.AI", count: int = 10) -> RecentPapers:
 	"""
 	Get recent papers from a specific arXiv category.
 
@@ -434,7 +434,7 @@ async def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 			response = await client.get(url)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
-		return _http_error_response(exc)
+		raise _http_error(exc) from exc
 
 	soup = BeautifulSoup(response.text, "html.parser")
 
@@ -486,18 +486,18 @@ async def get_recent(category: str = "cs.AI", count: int = 10) -> dict:
 					url_abstract=f"{URL_BASE}/abs/{id_arxiv}",
 					url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
 				)
-				papers.append(paper.model_dump())
+				papers.append(paper)
 
 			i += 2
 		else:
 			i += 1
 
-	return {
-		"category": category,
-		"category_name": ARXIV_CATEGORIES.get(category, category),
-		"count": len(papers),
-		"papers": papers,
-	}
+	return RecentPapers(
+		category=category,
+		category_name=ARXIV_CATEGORIES.get(category, category),
+		count=len(papers),
+		papers=papers,
+	)
 
 
 def main():

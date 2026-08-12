@@ -192,6 +192,20 @@ Use `list_categories` tool to get the full list.
 
 ## Changelog
 
+### v0.4.0
+
+**Breaking Changes:**
+- Upgraded to MCP Python SDK v2 (`mcp>=2.0.0`); server now uses `MCPServer` (formerly `FastMCP`)
+- Structured output: all tools declare an `outputSchema` and return typed structured content
+  (`search`/`search_advanced` return `SearchResult`, `get_paper` returns `Paper`, `get_recent` returns `RecentPapers`)
+- `list_categories` structured content is wrapped as `{"result": [...]}` because the MCP spec requires
+  `structuredContent` to be a JSON object
+- Errors no longer return `{"error": "..."}` dicts or error strings; all failures (HTTP errors, invalid
+  arXiv ID, missing search fields) now raise and surface as standard MCP tool errors
+
+**Improvements:**
+- New `RecentPapers` model for `get_recent` responses
+
 ### v0.3.0
 
 **Breaking Changes:**

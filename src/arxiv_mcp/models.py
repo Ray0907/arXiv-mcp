@@ -39,6 +39,15 @@ class SearchResult(BaseModel):
 		return self
 
 
+class RecentPapers(BaseModel):
+	"""Recent papers from a specific arXiv category."""
+
+	category: str = Field(description="Category code (e.g., 'cs.AI')")
+	category_name: str = Field(description="Full category name")
+	count: int = Field(description="Number of papers returned")
+	papers: list[Paper] = Field(description="List of recent papers")
+
+
 class Category(BaseModel):
 	"""arXiv category information."""
 
