@@ -126,6 +126,65 @@ async def test_list_categories_structured_content_wrapped():
     assert result.structured_content["result"][0]["code"]
 
 
+@pytest.mark.parametrize(
+    ("id_or_url", "resource_uri"),
+    [
+        ("2301.00001", "arxiv://content/2301.00001"),
+        (
+            "https://arxiv.org/abs/2301.00001",
+            "arxiv://content/https%3A%2F%2Farxiv.org%2Fabs%2F2301.00001",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_content_returns_jina_resource_link(monkeypatch, id_or_url, resource_uri):
+    from mcp.types import ResourceLink
+    from arxiv_mcp.server import mcp
+
+    jina_url = "https://r.jina.ai/https://arxiv.org/abs/2301.00001"
+    requests = []
+
+    class UnreadableStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            raise AssertionError("validation request body was read")
+            yield b""  # pragma: no cover
+
+    def respond(request):
+        requests.append((request.method, str(request.url)))
+        if len(requests) == 1:
+            return httpx.Response(200, stream=UnreadableStream())
+        return httpx.Response(200, text="full paper text")
+
+    async_client = httpx.AsyncClient
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: async_client(transport=transport))
+
+    result = await mcp.call_tool("get_content", {"id_or_url": id_or_url})
+
+    assert requests == [("GET", jina_url)]
+    assert result.structured_content is None
+    assert len(result.content) == 1
+    assert isinstance(result.content[0], ResourceLink)
+    assert str(result.content[0].uri) == resource_uri
+    assert result.content[0].mime_type == "text/markdown"
+
+    resource = await mcp.read_resource(result.content[0].uri)
+    assert resource[0].content == "full paper text"
+    assert requests == [("GET", jina_url), ("GET", jina_url)]
+
+
+@pytest.mark.asyncio
+async def test_get_content_stream_raises_on_http_failure(monkeypatch):
+    from arxiv_mcp.server import get_content
+
+    async_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(404, request=request))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: async_client(transport=transport))
+
+    with pytest.raises(ValueError, match="404"):
+        await get_content("2301.00001")
+
+
 @pytest.mark.asyncio
 async def test_get_content_rejects_non_arxiv_url():
     from arxiv_mcp.server import get_content

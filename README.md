@@ -7,7 +7,7 @@ A Model Context Protocol (MCP) server that provides arXiv paper search and retri
 - Search papers by query, author, category, and date
 - Advanced search with specific field filters
 - Get detailed paper metadata (title, abstract, authors, categories)
-- Retrieve full paper content via Jina Reader
+- Retrieve full paper content through server-backed MCP resource links without embedding large papers in tool results
 - Browse recent papers by category
 - List all arXiv categories
 - Pagination support for search results
@@ -50,7 +50,7 @@ Get detailed information about a specific arXiv paper.
 | `id_or_url` | string | Yes | arXiv ID (e.g., '2301.00001') or full URL |
 
 ### `get_content`
-Get the full text content of an arXiv paper using Jina Reader.
+Validate an arXiv paper through a streamed Jina Reader request, then return an `arxiv://` MCP resource link. Clients read the link through `resources/read`; the paper text is fetched only then and is never embedded in the tool result. A server-backed custom URI is used because MCP does not require every client to fetch external `https://` resource links directly.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|

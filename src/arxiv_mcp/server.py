@@ -7,6 +7,7 @@ from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 from mcp.server import MCPServer
+from mcp.types import ResourceLink
 
 from .models import (
 	ARXIV_CATEGORIES,
@@ -348,17 +349,7 @@ async def get_paper(id_or_url: str) -> Paper:
 	return paper
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def get_content(id_or_url: str) -> str:
-	"""
-	Get the full text content of an arXiv paper using Jina Reader.
-
-	Args:
-		id_or_url: arXiv paper ID (e.g., '2301.00001') or full arXiv URL
-
-	Returns:
-		Full text content of the paper in markdown format
-	"""
+def _jina_url(id_or_url: str) -> str:
 	if id_or_url.startswith('https://') or id_or_url.startswith('http://'):
 		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
 			raise ValueError(f'URL must point to arxiv.org, got: {id_or_url}')
@@ -366,17 +357,53 @@ async def get_content(id_or_url: str) -> str:
 	else:
 		id_arxiv = extract_paper_id(id_or_url)
 		url_target = f'{URL_BASE}/abs/{id_arxiv or id_or_url}'
+	return f"{URL_JINA}/{url_target}"
 
-	jina_url = f"{URL_JINA}/{url_target}"
 
+@mcp.resource(
+	"arxiv://content/{id_or_url}",
+	name="arXiv paper content",
+	mime_type="text/markdown",
+)
+async def paper_content(id_or_url: str) -> str:
+	"""Read the full text of an arXiv paper through Jina Reader."""
+	jina_url = _jina_url(id_or_url)
 	try:
 		async with httpx.AsyncClient(timeout=TIMEOUT * 2) as client:
 			response = await client.get(jina_url)
 			response.raise_for_status()
 	except httpx.HTTPStatusError as exc:
 		raise _http_error(exc) from exc
-
 	return response.text
+
+
+@mcp.tool(
+	annotations={"readOnlyHint": True, "openWorldHint": True},
+	structured_output=False,
+)
+async def get_content(id_or_url: str) -> ResourceLink:
+	"""
+	Get the full text content of an arXiv paper using Jina Reader.
+
+	Args:
+		id_or_url: arXiv paper ID (e.g., '2301.00001') or full arXiv URL
+
+	Returns:
+		Resource link to the paper's full text in markdown format
+	"""
+	jina_url = _jina_url(id_or_url)
+	try:
+		async with httpx.AsyncClient(timeout=TIMEOUT * 2) as client:
+			async with client.stream("GET", jina_url) as response:
+				response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		raise _http_error(exc) from exc
+
+	return ResourceLink(
+		name="arXiv paper content",
+		uri=f"arxiv://content/{urllib.parse.quote(id_or_url, safe='')}",
+		mimeType="text/markdown",
+	)
 
 
 def _build_categories() -> list[Category]:
