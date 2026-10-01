@@ -1,6 +1,9 @@
 """arXiv MCP Server - Main server implementation."""
 
+import argparse
+import asyncio
 import re
+import time
 import urllib.parse
 from typing import Optional
 
@@ -8,6 +11,11 @@ import httpx
 from bs4 import BeautifulSoup
 from mcp.server import MCPServer
 from mcp.types import ResourceLink
+from openai_mcp_extensions import (
+	OpenAIExtensions,
+	OpenAIMentionSearchParams,
+	OpenAIMentionSearchResult,
+)
 
 from .models import (
 	ARXIV_CATEGORIES,
@@ -18,7 +26,54 @@ from .models import (
 	SearchResult,
 )
 
-mcp = MCPServer("arXiv-server")
+openai_extensions = OpenAIExtensions()
+
+
+MENTION_MIN_CHARS = 3  # ChatGPT sends one query per keystroke
+MENTION_TTL = 300.0
+MENTION_TIMEOUT = 8.0
+MENTION_DEBOUNCE = 0.5  # keystrokes arrive as separate calls; only the newest one searches
+MENTION_COOLDOWN = 15.0  # pause after an arXiv error (429), instead of hammering it
+_mention_seq = 0
+_mention_blocked_until = 0.0
+_mention_cache: dict[str, tuple[float, list[ResourceLink]]] = {}  # ponytail: unbounded, add LRU if it grows
+
+
+# Must be registered before MCPServer is constructed.
+@openai_extensions.mentions.search
+async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIMentionSearchResult:
+	"""ChatGPT composer @-mention: typeahead over arXiv search."""
+	global _mention_seq, _mention_blocked_until
+	query = params.query.strip()
+	if len(query) < MENTION_MIN_CHARS:
+		return OpenAIMentionSearchResult(items=[])
+	key = query.lower()
+	hit = _mention_cache.get(key)
+	if hit and time.monotonic() - hit[0] < MENTION_TTL:
+		return OpenAIMentionSearchResult(items=hit[1])
+	_mention_seq += 1
+	seq = _mention_seq
+	await asyncio.sleep(MENTION_DEBOUNCE)
+	if seq != _mention_seq or time.monotonic() < _mention_blocked_until:
+		return OpenAIMentionSearchResult(items=[])  # superseded by a newer keystroke, or cooling down
+	try:
+		result = await asyncio.wait_for(search(query), MENTION_TIMEOUT)  # arXiv `size` only accepts 25/50/100/200
+	except (asyncio.TimeoutError, ValueError):
+		_mention_blocked_until = time.monotonic() + MENTION_COOLDOWN
+		return OpenAIMentionSearchResult(items=[])  # not cached
+	items = [
+		ResourceLink(
+			name=paper.title,
+			uri=f"arxiv://content/{urllib.parse.quote(paper.id_arxiv, safe='')}",
+			mimeType="text/markdown",
+		)
+		for paper in result.papers[:10]
+	]
+	_mention_cache[key] = (time.monotonic(), items)
+	return OpenAIMentionSearchResult(items=items)
+
+
+mcp = MCPServer("arXiv-server", extensions=[openai_extensions])
 
 URL_BASE = "https://arxiv.org"
 URL_EXPORT = "https://export.arxiv.org"
@@ -528,8 +583,16 @@ async def get_recent(category: str = "cs.AI", count: int = 10) -> RecentPapers:
 
 
 def main():
-	"""Run the arXiv MCP server."""
-	mcp.run(transport="stdio")
+	"""Run the arXiv MCP server over stdio (default) or Streamable HTTP."""
+	parser = argparse.ArgumentParser(description=__doc__)
+	parser.add_argument("--http", action="store_true", help="Serve Streamable HTTP at /mcp")
+	parser.add_argument("--host", default="127.0.0.1", help="HTTP bind host (default: 127.0.0.1)")
+	parser.add_argument("--port", type=int, default=8000, help="HTTP bind port (default: 8000)")
+	args = parser.parse_args()
+	if args.http:
+		mcp.run(transport="streamable-http", host=args.host, port=args.port, streamable_http_path="/mcp")
+	else:
+		mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "arxiv": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "${PLUGIN_ROOT}", "run", "arxiv-mcp"]
+    }
+  }
+}

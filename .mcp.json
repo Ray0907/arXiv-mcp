@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "arxiv": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "${PLUGIN_ROOT}", "run", "arxiv-mcp"]
+    }
+  }
+}
