@@ -15,7 +15,7 @@ connection, tunnel, and Agent Plugins schema pages:
 
 ## Inspector CLI: actual stdio check
 
-Run from `/private/tmp/arXiv-mcp`. Both commands below exited **0**:
+Run from `/path/to/arXiv-mcp`. Both commands below exited **0**:
 
 ```sh
 npx --yes @modelcontextprotocol/inspector --cli uv run arxiv-mcp --method tools/list
@@ -52,14 +52,14 @@ Selected actual `tools/list` output (schemas omitted for readability):
 Actual search HTTP log and selected structured output (paper bodies omitted):
 
 ```text
-HTTP Request: GET https://arxiv.org/search/?query=attention+is+all+you+need&searchtype=all&abstracts=show&order=&size=25&start=0 "HTTP/1.1 200 OK"
+HTTP Request: GET https://export.arxiv.org/api/query?search_query=all%3A%22attention+is+all+you+need%22&sortBy=relevance&sortOrder=descending&start=0&max_results=25 "HTTP/1.1 200 OK"
 ```
 
 ```json
 {
   "structuredContent": {
-    "query": "attention is all you need",
-    "total_results": 133,
+    "query": "all:\"attention is all you need\"",
+    "total_results": 47,
     "page": 1,
     "page_size": 25,
     "has_more": true,
@@ -69,31 +69,14 @@ HTTP Request: GET https://arxiv.org/search/?query=attention+is+all+you+need&sear
 ```
 
 The actual `structuredContent.papers` contained **25 papers**; `isError` was
-absent (not an error). The first paper's fields were:
+`false`. `query` echoes the API query: a query containing a stopword is sent as a
+phrase, because the API drops stopwords from ANDed words. The first paper was
+`2604.21816`, "Tool Attention Is All You Need: Dynamic Tool Gating and Lazy Schema
+Loading", with `url_abstract` `https://arxiv.org/abs/2604.21816`.
 
-```json
-{
-  "id_arxiv": "2609.13531",
-  "title": "Attention Is All You Need (to Avoid Spurious Oscillations)",
-  "url_abstract": "https://arxiv.org/pdf/2609.13531"
-}
-```
-
-Raw command output was captured during this check in
-`/tmp/arxiv-mcp-verification/inspector-list.log` and
-`/tmp/arxiv-mcp-verification/inspector-search-default.log` (temporary local files,
-not shipped with the plugin). Results depend on live arXiv data.
-
-An initial call with the additional `--tool-arg page_size=1` exited **5**:
-
-```text
-HTTP Request: GET https://arxiv.org/search/?query=attention+is+all+you+need&searchtype=all&abstracts=show&order=&size=1&start=0 "HTTP/1.1 400 Bad Request"
-Error executing tool search: arXiv returned HTTP 400. Try adjusting your query or try again later.
-{"error":{"code":"tool_is_error","message":"Tool 'search' returned isError:true."}}
-```
-
-Retrying with the existing default (`25`) succeeded as shown above. No existing
-search behavior was changed. `uv` also printed its existing
+The same call with `--tool-arg page_size=1` also exited **0** and returned 1 paper
+(`max_results=1`); the API accepts any page size up to the tool's cap of 50. Results
+depend on live arXiv data. `uv` also printed its existing
 `tool.uv.dev-dependencies` deprecation warning.
 
 ## Connect in ChatGPT developer mode (user-run, not verified here)
@@ -118,7 +101,7 @@ Developer mode and tunnel availability depend on account/workspace permissions.
    key; do not commit credentials):
 
    ```sh
-   cd /private/tmp/arXiv-mcp
+   cd /path/to/arXiv-mcp
    uv sync
    tunnel-client help quickstart
    export CONTROL_PLANE_API_KEY="<your runtime API key>"
@@ -126,7 +109,7 @@ Developer mode and tunnel availability depend on account/workspace permissions.
      --sample sample_mcp_stdio_local \
      --profile arxiv-stdio \
      --tunnel-id '<your tunnel_id>' \
-     --mcp-command "uv --directory /private/tmp/arXiv-mcp run arxiv-mcp"
+     --mcp-command "uv --directory /path/to/arXiv-mcp run arxiv-mcp"
    tunnel-client doctor --profile arxiv-stdio --explain
    tunnel-client run --profile arxiv-stdio
    ```

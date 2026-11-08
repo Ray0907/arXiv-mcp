@@ -100,10 +100,11 @@ ARXIV_CATEGORIES: dict[str, str] = {
 	"q-fin.CP": "Computational Finance",
 }
 
-SORT_OPTIONS: dict[str, str] = {
-	"relevance": "",
-	"date_desc": "-announced_date_first",
-	"date_asc": "announced_date_first",
-	"submissions_desc": "-submittedDate",
-	"submissions_asc": "submittedDate",
+# sort_by value -> (API sortBy, API sortOrder)
+SORT_OPTIONS: dict[str, tuple[str, str]] = {
+	"relevance": ("relevance", "descending"),
+	"date_desc": ("submittedDate", "descending"),
+	"date_asc": ("submittedDate", "ascending"),
+	"updated_desc": ("lastUpdatedDate", "descending"),
+	"updated_asc": ("lastUpdatedDate", "ascending"),
 }

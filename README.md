@@ -1,6 +1,6 @@
 # arXiv MCP Server
 
-A Model Context Protocol (MCP) server that provides arXiv paper search and retrieval capabilities. This server enables LLMs to search for academic papers on arXiv and get cleaned titles, abstracts, authors, and content without dealing with complex HTML parsing.
+A Model Context Protocol (MCP) server that provides arXiv paper search and retrieval capabilities. This server enables LLMs to search for academic papers on arXiv and get titles, abstracts, authors, and content from the official arXiv API.
 
 ## Features
 
@@ -22,7 +22,7 @@ Search arXiv for papers matching a query.
 | `query` | string | Yes | Search query (e.g., 'LLM', 'transformer') |
 | `category` | string | No | Filter by category (e.g., 'cs.AI', 'cs.LG') |
 | `author` | string | No | Filter by author name |
-| `sort_by` | string | No | Sort order: 'relevance', 'date_desc', 'date_asc' |
+| `sort_by` | string | No | Sort order: 'relevance', 'date_desc', 'date_asc', 'updated_desc', 'updated_asc' |
 | `page` | int | No | Page number (default: 1) |
 | `page_size` | int | No | Results per page, max 50 (default: 25) |
 
@@ -35,10 +35,10 @@ Advanced search with specific field filters.
 | `abstract` | string | No | Search in abstracts |
 | `author` | string | No | Search by author name |
 | `category` | string | No | Filter by category |
-| `id_arxiv` | string | No | Search by arXiv ID pattern |
-| `date_from` | string | No | Start date (YYYY-MM-DD) |
-| `date_to` | string | No | End date (YYYY-MM-DD) |
-| `sort_by` | string | No | Sort order |
+| `id_arxiv` | string | No | Restrict to one arXiv ID; combines with the other filters |
+| `date_from` | string | No | Start of submission date range (YYYY-MM-DD) |
+| `date_to` | string | No | End of submission date range (YYYY-MM-DD) |
+| `sort_by` | string | No | Same options as `search` |
 | `page` | int | No | Page number |
 | `page_size` | int | No | Results per page |
 
@@ -66,6 +66,19 @@ Get recent papers from a specific arXiv category.
 
 ### `list_categories`
 List all common arXiv categories with their codes and names.
+
+## Search Behavior
+
+- Results come from the official arXiv API (`export.arxiv.org/api/query`). Requests are spaced 3 seconds
+  apart per server process, as the API terms ask.
+- The words of a query are ANDed. A query containing a stopword (`is`, `the`, `for`, ...) is sent as an exact
+  phrase instead, because the API drops stopwords from ANDed words and would return nothing.
+- A query that already uses arXiv field syntax (`ti:`, `au:`, `abs:`, `cat:`, `all:`) is passed through as is.
+- Titles and abstracts keep their raw LaTeX (`$\alpha$`). Search by plain words (`alpha divergence`); LaTeX
+  markup in a query does not match.
+- Versioned IDs (`2301.00001v2`) are looked up as given. The API rejects versioned legacy IDs
+  (`hep-th/9901001v1`), so the version is dropped for those.
+- Dates in results are ISO timestamps, e.g. `2017-06-12T17:57:34Z`.
 
 ## Installation
 
@@ -191,6 +204,23 @@ uv run arxiv-mcp
 Use `list_categories` tool to get the full list.
 
 ## Changelog
+
+### Unreleased
+
+**Breaking Changes:**
+- `search`, `search_advanced`, `get_paper` and `get_recent` now call the official arXiv API
+  (`export.arxiv.org/api/query`) instead of scraping HTML; `beautifulsoup4` is no longer a dependency
+- Dates are ISO timestamps (`2017-06-12T17:57:34Z`), not `12 June, 2017`
+- An unknown `sort_by` raises instead of being ignored
+- `search_advanced` `id_arxiv` restricts the result to that ID instead of matching a pattern
+
+**Improvements:**
+- `date_updated` is filled in, and `get_recent` results include abstracts
+- `search_advanced` date range now works
+- `get_paper` and ID parsing accept versioned (`2301.00001v2`), legacy (`hep-th/9901001`) and `arXiv:`-prefixed IDs
+- Requests are spaced 3 seconds apart per process and send a descriptive `User-Agent`, as the arXiv API terms ask
+- Multi-word queries AND their words; a query containing a stopword is sent as a phrase because the API
+  drops stopwords from ANDed words
 
 ### v0.4.0
 

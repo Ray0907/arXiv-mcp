@@ -5,10 +5,11 @@ import asyncio
 import re
 import time
 import urllib.parse
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from bs4 import BeautifulSoup
 from mcp.server import MCPServer
 from mcp.types import ResourceLink
 from openai_mcp_extensions import (
@@ -57,7 +58,7 @@ async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIM
 	if seq != _mention_seq or time.monotonic() < _mention_blocked_until:
 		return OpenAIMentionSearchResult(items=[])  # superseded by a newer keystroke, or cooling down
 	try:
-		result = await asyncio.wait_for(search(query), MENTION_TIMEOUT)  # arXiv `size` only accepts 25/50/100/200
+		result = await asyncio.wait_for(search(query), MENTION_TIMEOUT)
 	except (asyncio.TimeoutError, ValueError):
 		_mention_blocked_until = time.monotonic() + MENTION_COOLDOWN
 		return OpenAIMentionSearchResult(items=[])  # not cached
@@ -76,10 +77,19 @@ async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIM
 mcp = MCPServer("arXiv-server", extensions=[openai_extensions])
 
 URL_BASE = "https://arxiv.org"
-URL_EXPORT = "https://export.arxiv.org"
+URL_EXPORT = "https://export.arxiv.org/api/query"
 URL_JINA = "https://r.jina.ai"
 _ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
+
+
+# New style 2301.00001, legacy hep-th/9901001 or math.GT/0309136; optional vN; bare, arXiv:-prefixed, or in an abs/pdf URL.
+_ARXIV_ID_RE = re.compile(
+	r"^(?:arxiv:|https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/)?"
+	r"(?P<id>(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?)"
+	r"(?:\.pdf)?/?$",
+	re.IGNORECASE,
+)
 
 
 def _http_error(exc: httpx.HTTPStatusError) -> ValueError:
@@ -89,16 +99,8 @@ def _http_error(exc: httpx.HTTPStatusError) -> ValueError:
 
 def extract_paper_id(url: str) -> Optional[str]:
 	"""Extract arXiv paper ID from URL or return ID if already in ID format."""
-	patterns = [
-		r"arxiv\.org/abs/(\d+\.\d+)",
-		r"arxiv\.org/pdf/(\d+\.\d+)",
-		r"^(\d+\.\d+)$",
-	]
-	for pattern in patterns:
-		match = re.search(pattern, url)
-		if match:
-			return match.group(1)
-	return None
+	match = _ARXIV_ID_RE.search(url.strip())
+	return match.group("id") if match else None
 
 
 def clean_text(text: str) -> str:
@@ -108,87 +110,119 @@ def clean_text(text: str) -> str:
 	return text.strip()
 
 
-def parse_search_results(html: str, query: str, page: int, page_size: int) -> SearchResult:
-	"""Parse arXiv search results HTML into structured data."""
-	soup = BeautifulSoup(html, "html.parser")
-	items = soup.select(".arxiv-result")
+ARXIV_MIN_INTERVAL = 3.0  # arXiv API terms: at most one request per 3 seconds
+USER_AGENT = "arxiv-mcp (+https://github.com/Ray0907/arXiv-mcp)"
+_rate_lock = asyncio.Lock()
+_last_request = 0.0
 
-	# Try to extract total results count
-	total_text = soup.select_one(".title.is-clearfix")
-	total_results = 0
-	if total_text:
-		match = re.search(r"of ([\d,]+) results", total_text.text)
-		if match:
-			total_results = int(match.group(1).replace(",", ""))
+_NS = {
+	"atom": "http://www.w3.org/2005/Atom",
+	"opensearch": "http://a9.com/-/spec/opensearch/1.1/",
+	"arxiv": "http://arxiv.org/schemas/atom",
+}
+_VERSION_RE = re.compile(r"v\d+$")
+MAX_PAGE_SIZE = 50
 
+# search_advanced / search argument -> (API field prefix, always a phrase)
+_FIELD_PREFIXES = {"title": ("ti", False), "abstract": ("abs", False), "author": ("au", True), "category": ("cat", False)}
+_STOPWORDS = frozenset(
+	"a an and are as at be but by for if in into is it no not of on or such that the their then there these they this to was will with".split()
+)
+_FIELD_SYNTAX_RE = re.compile(r"\b(?:all|ti|au|abs|co|jr|cat|rn):", re.IGNORECASE)
+
+
+def _text(node: Optional[ET.Element]) -> str:
+	return clean_text(node.text or "") if node is not None else ""
+
+
+def _parse_atom(xml_text: str) -> tuple[list[Paper], int]:
+	"""Parse an arXiv API Atom feed into papers and the opensearch total."""
+	try:
+		root = ET.fromstring(xml_text)
+	except ET.ParseError as exc:
+		raise ValueError("arXiv returned an unparseable response. Try again later.") from exc
+
+	total = int(_text(root.find("opensearch:totalResults", _NS)) or 0)
 	papers = []
-	for item in items:
-		try:
-			# Extract title
-			title_elem = item.select_one(".title")
-			title = clean_text(title_elem.text) if title_elem else "Unknown Title"
+	for entry in root.findall("atom:entry", _NS):
+		raw_id = _text(entry.find("atom:id", _NS))
+		# Invalid requests come back as HTTP 200 with one entry titled "Error".
+		if _text(entry.find("atom:title", _NS)) == "Error" and "/api/errors" in raw_id:
+			raise ValueError(f"arXiv API error: {_text(entry.find('atom:summary', _NS))}")
 
-			# Extract abstract
-			abstract_elem = item.select_one(".abstract-full")
-			if not abstract_elem:
-				abstract_elem = item.select_one(".abstract")
-			abstract = clean_text(abstract_elem.text) if abstract_elem else ""
-			# Remove "Less" or "More" button text
-			abstract = re.sub(r"\s*(Less|More)\s*$", "", abstract)
-			abstract = re.sub(r"^Abstract:\s*", "", abstract)
-
-			# Extract URL and ID
-			url_elem = item.select_one(".list-title > span > a")
-			url_abstract = url_elem.get("href") if url_elem else ""
-			id_arxiv = extract_paper_id(url_abstract) or ""
-
-			# Extract authors
-			authors = []
-			authors_elem = item.select(".authors a")
-			for author in authors_elem:
-				authors.append(author.text.strip())
-
-			# Extract categories
-			categories = []
-			tags = item.select(".tag.is-small")
-			for tag in tags:
-				cat_text = tag.text.strip()
-				if cat_text and not cat_text.startswith("doi:"):
-					categories.append(cat_text)
-
-			# Extract dates
-			date_elem = item.select_one(".is-size-7")
-			date_published = None
-			date_updated = None
-			if date_elem:
-				date_text = date_elem.text
-				submitted_match = re.search(r"Submitted\s+(\d+\s+\w+,?\s+\d+)", date_text)
-				if submitted_match:
-					date_published = submitted_match.group(1)
-
-			paper = Paper(
+		id_arxiv = _VERSION_RE.sub("", extract_paper_id(raw_id) or raw_id)
+		categories = [c.get("term", "") for c in entry.findall("atom:category", _NS)]
+		papers.append(
+			Paper(
 				id_arxiv=id_arxiv,
-				title=title,
-				abstract=abstract,
-				authors=authors,
-				categories=categories,
-				url_abstract=url_abstract,
-				url_pdf=f"https://arxiv.org/pdf/{id_arxiv}.pdf" if id_arxiv else "",
-				date_published=date_published,
-				date_updated=date_updated,
+				title=_text(entry.find("atom:title", _NS)),
+				abstract=_text(entry.find("atom:summary", _NS)),
+				authors=[_text(n) for n in entry.findall("atom:author/atom:name", _NS)],
+				categories=[c for c in categories if c],
+				url_abstract=f"{URL_BASE}/abs/{id_arxiv}",
+				url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
+				date_published=_text(entry.find("atom:published", _NS)) or None,
+				date_updated=_text(entry.find("atom:updated", _NS)) or None,
 			)
-			papers.append(paper)
-		except Exception:
-			# Skip papers that fail to parse
-			continue
+		)
+	return papers, total
 
+
+async def _throttle() -> None:
+	global _last_request
+	async with _rate_lock:
+		wait = _last_request + ARXIV_MIN_INTERVAL - time.monotonic()
+		if wait > 0:
+			await asyncio.sleep(wait)
+		_last_request = time.monotonic()
+
+
+async def _query_atom(params: dict[str, str], page: int = 1, page_size: int = 25) -> SearchResult:
+	"""Call the arXiv Atom API; `params` holds search_query/id_list/sortBy/sortOrder."""
+	page = max(page, 1)
+	page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+	request_params = {**params, "start": str((page - 1) * page_size), "max_results": str(page_size)}
+
+	await _throttle()
+	try:
+		async with httpx.AsyncClient(
+			timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True
+		) as client:
+			response = await client.get(URL_EXPORT, params=request_params)
+			response.raise_for_status()
+	except httpx.HTTPStatusError as exc:
+		raise _http_error(exc) from exc
+
+	papers, total = _parse_atom(response.text)
 	return SearchResult(
-		query=query,
-		total_results=total_results,
+		query=params.get("search_query") or params.get("id_list", ""),
+		total_results=total,
 		papers=papers,
 		page=page,
 		page_size=page_size,
 	)
+
+
+def _sort_params(sort_by: str) -> dict[str, str]:
+	if sort_by not in SORT_OPTIONS:
+		raise ValueError(f"Unknown sort_by '{sort_by}'. Use one of: {', '.join(SORT_OPTIONS)}")
+	api_sort_by, api_sort_order = SORT_OPTIONS[sort_by]
+	return {"sortBy": api_sort_by, "sortOrder": api_sort_order}
+
+
+def _term(prefix: str, value: str, phrase: bool = False) -> str:
+	"""Words are ANDed for recall. The API drops stopwords from ANDed words ('is' makes the query match nothing), so a value with one becomes a phrase."""
+	words = value.replace('"', " ").split()
+	if len(words) <= 1:
+		return f"{prefix}:{words[0]}" if words else ""
+	if phrase or any(word.lower() in _STOPWORDS for word in words):
+		return f'{prefix}:"{" ".join(words)}"'
+	return " AND ".join(f"{prefix}:{word}" for word in words)
+
+
+def _field_terms(**values: Optional[str]) -> list[str]:
+	terms = (_term(prefix, values[name], phrase) for name, (prefix, phrase) in _FIELD_PREFIXES.items() if values.get(name))
+	return [term for term in terms if term]
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -207,43 +241,22 @@ async def search(
 		query: Search query for arXiv papers (e.g., 'LLM', 'transformer architecture')
 		category: Filter by arXiv category (e.g., 'cs.AI', 'cs.LG', 'stat.ML')
 		author: Filter by author name
-		sort_by: Sort order - 'relevance', 'date_desc', 'date_asc'
+		sort_by: Sort order - 'relevance', 'date_desc', 'date_asc', 'updated_desc', 'updated_asc'
 		page: Page number (default: 1)
 		page_size: Results per page, max 50 (default: 25)
 
 	Returns:
 		Search results with papers containing title, abstract, authors, and URLs
 	"""
-	page_size = min(page_size, 50)
-	start = (page - 1) * page_size
+	sort = _sort_params(sort_by)
+	query = query.strip()
+	# A query that already uses API field syntax (ti:, au:, ...) is passed through untouched.
+	text_term = query if _FIELD_SYNTAX_RE.search(query) else _term("all", query)
+	terms = ([text_term] if text_term else []) + _field_terms(author=author, category=category)
+	if not terms:
+		raise ValueError("A query, author or category is required")
 
-	# Build search query
-	search_terms = []
-	if query:
-		search_terms.append(query)
-	if author:
-		search_terms.append(f"au:{author}")
-	if category:
-		search_terms.append(f"cat:{category}")
-
-	full_query = " AND ".join(search_terms) if len(search_terms) > 1 else (search_terms[0] if search_terms else "")
-	encoded_query = urllib.parse.quote_plus(full_query)
-
-	sort_order = SORT_OPTIONS.get(sort_by, "")
-	url = (
-		f"{URL_BASE}/search/?query={encoded_query}"
-		f"&searchtype=all&abstracts=show"
-		f"&order={sort_order}&size={page_size}&start={start}"
-	)
-
-	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-			response = await client.get(url)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
-
-	return parse_search_results(response.text, full_query, page, page_size)
+	return await _query_atom({"search_query": " AND ".join(terms), **sort}, page, page_size)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -267,63 +280,46 @@ async def search_advanced(
 		abstract: Search in abstracts
 		author: Search by author name
 		category: Filter by arXiv category (e.g., 'cs.AI', 'cs.LG')
-		id_arxiv: Search by arXiv ID pattern
-		date_from: Start date filter (YYYY-MM-DD format)
-		date_to: End date filter (YYYY-MM-DD format)
-		sort_by: Sort order - 'relevance', 'date_desc', 'date_asc'
+		id_arxiv: Restrict to an arXiv ID (e.g., '2301.00001'); combines with the other filters
+		date_from: Start of submission date range (YYYY-MM-DD format)
+		date_to: End of submission date range (YYYY-MM-DD format)
+		sort_by: Sort order - 'relevance', 'date_desc', 'date_asc', 'updated_desc', 'updated_asc'
 		page: Page number (default: 1)
 		page_size: Results per page, max 50 (default: 25)
 
 	Returns:
 		Search results with papers containing title, abstract, authors, and URLs
 	"""
-	page_size = min(page_size, 50)
-	start = (page - 1) * page_size
+	sort = _sort_params(sort_by)
+	terms = _field_terms(title=title, abstract=abstract, author=author, category=category)
 
-	# Build advanced query parts
-	query_parts = []
-	if title:
-		query_parts.append(f"ti:{title}")
-	if abstract:
-		query_parts.append(f"abs:{abstract}")
-	if author:
-		query_parts.append(f"au:{author}")
-	if category:
-		query_parts.append(f"cat:{category}")
+	if date_from or date_to:
+		# The API needs both bounds; arXiv's first submissions date from 1991.
+		day_from = _api_day(date_from) if date_from else "19910101"
+		day_to = _api_day(date_to) if date_to else datetime.now(timezone.utc).strftime("%Y%m%d")
+		terms.append(f"submittedDate:[{day_from}0000 TO {day_to}2359]")
+
+	params = dict(sort)
 	if id_arxiv:
-		query_parts.append(f"id:{id_arxiv}")
-
-	if not query_parts:
+		params["id_list"] = _api_id(extract_paper_id(id_arxiv) or id_arxiv.strip())
+	if not terms and "id_list" not in params:
 		raise ValueError("At least one search field is required")
+	if terms:
+		params["search_query"] = " AND ".join(terms)
 
-	full_query = " AND ".join(query_parts)
-	encoded_query = urllib.parse.quote_plus(full_query)
+	return await _query_atom(params, page, page_size)
 
-	sort_order = SORT_OPTIONS.get(sort_by, "")
 
-	# Build URL with date filters if provided
-	url = (
-		f"{URL_BASE}/search/advanced?terms-0-operator=AND"
-		f"&terms-0-term={encoded_query}&terms-0-field=all"
-		f"&classification-physics_archives=all"
-		f"&classification-include_cross_list=include"
-		f"&abstracts=show&size={page_size}&start={start}"
-		f"&order={sort_order}"
-	)
+def _api_id(id_arxiv: str) -> str:
+	"""The API fails on a versioned legacy ID (hep-th/9901001v1), so only new-style IDs keep their version."""
+	return _VERSION_RE.sub("", id_arxiv) if "/" in id_arxiv else id_arxiv
 
-	if date_from:
-		url += f"&date-from_date={date_from}"
-	if date_to:
-		url += f"&date-to_date={date_to}"
 
+def _api_day(value: str) -> str:
 	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-			response = await client.get(url)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
-
-	return parse_search_results(response.text, full_query, page, page_size)
+		return datetime.strptime(value.strip(), "%Y-%m-%d").strftime("%Y%m%d")
+	except ValueError:
+		raise ValueError(f"Dates must use YYYY-MM-DD format, got: {value}") from None
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -341,66 +337,14 @@ async def get_paper(id_or_url: str) -> Paper:
 	if not id_arxiv:
 		raise ValueError(f"Could not extract arXiv ID from: {id_or_url}")
 
-	url_abstract = f"{URL_BASE}/abs/{id_arxiv}"
+	result = await _query_atom({"id_list": _api_id(id_arxiv)})
+	if not result.papers:
+		raise ValueError(f"No arXiv paper found for: {id_arxiv}")
 
-	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-			response = await client.get(url_abstract)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
-
-	soup = BeautifulSoup(response.text, "html.parser")
-
-	# Extract title
-	title_elem = soup.select_one(".title.mathjax")
-	title = clean_text(title_elem.text.replace("Title:", "")) if title_elem else "Unknown"
-
-	# Extract abstract
-	abstract_elem = soup.select_one(".abstract.mathjax")
-	abstract = clean_text(abstract_elem.text.replace("Abstract:", "")) if abstract_elem else ""
-
-	# Extract authors
-	authors = []
-	authors_div = soup.select_one(".authors")
-	if authors_div:
-		for a in authors_div.select("a"):
-			authors.append(a.text.strip())
-
-	# Extract categories
-	categories = []
-	subj_elem = soup.select_one(".tablecell.subjects")
-	if subj_elem:
-		for span in subj_elem.select("span.primary-subject"):
-			cat_match = re.search(r"\(([^)]+)\)", span.text)
-			if cat_match:
-				categories.append(cat_match.group(1))
-		# Also get secondary subjects
-		subj_text = subj_elem.text
-		cat_matches = re.findall(r"\(([a-z-]+\.[A-Z]+)\)", subj_text)
-		for cat in cat_matches:
-			if cat not in categories:
-				categories.append(cat)
-
-	# Extract dates
-	date_submitted = None
-	date_history = soup.select_one(".dateline")
-	if date_history:
-		date_match = re.search(r"Submitted.*?(\d+\s+\w+\s+\d+)", date_history.text)
-		if date_match:
-			date_submitted = date_match.group(1)
-
-	paper = Paper(
-		id_arxiv=id_arxiv,
-		title=title,
-		abstract=abstract,
-		authors=authors,
-		categories=categories,
-		url_abstract=url_abstract,
-		url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
-		date_published=date_submitted,
-	)
-
+	paper = result.papers[0]
+	# The feed id is versionless in our model; a pinned request keeps its version.
+	if _api_id(id_arxiv) == id_arxiv and _VERSION_RE.search(id_arxiv):
+		paper = paper.model_copy(update={"id_arxiv": id_arxiv})
 	return paper
 
 
@@ -508,77 +452,14 @@ async def get_recent(category: str = "cs.AI", count: int = 10) -> RecentPapers:
 	Returns:
 		Recent papers from the specified category
 	"""
-	count = min(count, 50)
-	url = f"{URL_BASE}/list/{category}/recent?skip=0&show={count}"
-
-	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-			response = await client.get(url)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
-
-	soup = BeautifulSoup(response.text, "html.parser")
-
-	papers = []
-	entries = soup.select("dl#articles dt, dl#articles dd")
-
-	# Process dt/dd pairs
-	i = 0
-	while i < len(entries) - 1:
-		if entries[i].name == "dt" and entries[i + 1].name == "dd":
-			dt = entries[i]
-			dd = entries[i + 1]
-
-			# Extract ID from dt
-			id_link = dt.select_one("a[href*='/abs/']")
-			id_arxiv = ""
-			if id_link:
-				href = id_link.get("href", "")
-				id_match = re.search(r"/abs/(\d+\.\d+)", href)
-				if id_match:
-					id_arxiv = id_match.group(1)
-
-			# Extract title
-			title_elem = dd.select_one(".list-title")
-			title = clean_text(title_elem.text.replace("Title:", "")) if title_elem else ""
-
-			# Extract authors
-			authors = []
-			authors_elem = dd.select_one(".list-authors")
-			if authors_elem:
-				for a in authors_elem.select("a"):
-					authors.append(a.text.strip())
-
-			# Extract subjects
-			categories = []
-			subj_elem = dd.select_one(".list-subjects")
-			if subj_elem:
-				subj_text = subj_elem.text
-				cat_matches = re.findall(r"([a-z-]+\.[A-Z]+)", subj_text)
-				categories = list(set(cat_matches))
-
-			if id_arxiv:
-				paper = Paper(
-					id_arxiv=id_arxiv,
-					title=title,
-					abstract="",  # Not available in list view
-					authors=authors,
-					categories=categories,
-					url_abstract=f"{URL_BASE}/abs/{id_arxiv}",
-					url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
-				)
-				papers.append(paper)
-
-			i += 2
-		else:
-			i += 1
-
+	result = await _query_atom(
+		{"search_query": f"cat:{category}", **_sort_params("date_desc")}, page_size=count
+	)
 	return RecentPapers(
 		category=category,
 		category_name=ARXIV_CATEGORIES.get(category, category),
-		count=len(papers),
-		papers=papers,
+		count=len(result.papers),
+		papers=result.papers,
 	)
 
 

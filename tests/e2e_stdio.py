@@ -1,9 +1,10 @@
 import asyncio, json, time
+from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 async def main():
-    params = StdioServerParameters(command="uv", args=["run", "arxiv-mcp"], cwd="/private/tmp/arXiv-mcp")
+    params = StdioServerParameters(command="uv", args=["run", "arxiv-mcp"], cwd=str(Path(__file__).resolve().parent.parent))
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w) as s:
             init = await s.initialize()
