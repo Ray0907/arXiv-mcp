@@ -150,6 +150,28 @@ Add to your Claude Code MCP settings:
 }
 ```
 
+### pi
+
+```bash
+pi mcp add arxiv -- uv --directory /path/to/arXiv-mcp run arxiv-mcp
+pi mcp list
+```
+
+`pi mcp list` should show `arxiv: connected, 7 tools`. Tools are exposed through code mode by default; add
+`--exposure direct` to `pi mcp add` to expose each tool directly. A project-level server (`-l`) is ignored
+until you trust the project in pi.
+
+### Antigravity CLI (agy)
+
+```bash
+agy mcp add arxiv -- uv --directory /path/to/arXiv-mcp run arxiv-mcp
+agy mcp list
+```
+
+`agy mcp list` only shows that the server is enabled; start a session and call a tool to confirm. In
+non-interactive mode (`agy -p`), MCP calls are denied until allowed, for example with an `mcp(*)` entry under
+`permissions.allow` in `settings.json`.
+
 ## Usage Examples
 
 ### Search for papers about LLMs
