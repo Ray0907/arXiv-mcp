@@ -205,7 +205,7 @@ Use `list_categories` tool to get the full list.
 
 ## Changelog
 
-### Unreleased
+### v0.5.0
 
 **Breaking Changes:**
 - `search`, `search_advanced`, `get_paper` and `get_recent` now call the official arXiv API
