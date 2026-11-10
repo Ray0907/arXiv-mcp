@@ -26,6 +26,7 @@ from openai_mcp_extensions import (
 )
 
 from .metadata import _parse_atom, clean_text, export_bibtex, get_papers
+from .reading import read_paper
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
@@ -383,6 +384,7 @@ async def get_paper(id_or_url: str) -> Paper:
 
 mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_papers)
 mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(export_bibtex)
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(read_paper)
 
 
 def _content_id(id_or_url: str) -> str:

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add `read_paper` for outlines plus abstracts, named sections and 10,000-character fallback
+  chunks, sharing the full-text cache. Cap responses (default 12,000 characters including
+  the marker; minimum 256) and provide lossless continuation via `offset`.
+
 - Add metadata-only `export_bibtex(ids)`, with stable cite keys, version deduplication,
   escaped fields, DOI/journal references and explicit missing IDs.
 

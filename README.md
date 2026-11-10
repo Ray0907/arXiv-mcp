@@ -6,7 +6,8 @@ A Model Context Protocol (MCP) server that provides arXiv paper search and retri
 
 - Search papers by query, author, category, and date
 - Advanced search with specific field filters
-- Get detailed paper metadata (title, abstract, authors, categories)
+- Get detailed paper metadata, batch lookups and metadata-only BibTeX citations
+- Read outlines, named sections or fixed-size chunks with a strict character cap
 - Retrieve full paper content through server-backed MCP resource links without embedding large papers in tool results
 - Browse recent papers by category
 - List all arXiv categories
@@ -77,6 +78,29 @@ Full text is cached per process by paper ID, keeping versions distinct: up to 32
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `id_or_url` | string | Yes | Valid arXiv ID or arxiv.org abstract/PDF URL; Jina reads the canonical PDF, not the abstract page |
+
+### `read_paper`
+Read a bounded text view using the same full-text cache as `get_content`. By default, return
+Markdown headings (with `section:N` selectors), chunk availability and the API abstract.
+Select a heading by case-insensitive name or unique partial match; ambiguous names raise an
+error rather than silently returning the wrong section. A section includes its subsections.
+ATX (`#`) and Setext headings are recognized; fenced code is ignored.
+
+PDF extraction sometimes has very few headings. `chunk:N` always provides a fallback: 1-based,
+fixed 10,000-character slices of the complete original text, including any preamble. No headings
+are guessed from unmarked text. The outline lists the available chunk range.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id_or_url` | string | Yes | Valid arXiv ID or abstract/PDF URL |
+| `section` | string | No | Heading name, `section:N` or `chunk:N`; omitted returns outline plus abstract |
+| `max_chars` | int | No | Character cap including truncation marker (default 12000, minimum 256) |
+| `offset` | int | No | Zero-based character offset within the selected view (default 0) |
+
+A truncated response says how to continue: keep `id_or_url`, `section`, and `max_chars` unchanged
+and use the indicated `offset`. This works for long sections, chunks and outlines. Character
+counts are Unicode characters, not bytes or tokens. The minimum cap leaves room for an actionable
+marker. The outline needs API metadata as well as PDF text; section/chunk reads only need PDF text.
 
 ### `get_recent`
 Get recent papers from a specific arXiv category.
