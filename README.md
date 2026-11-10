@@ -43,7 +43,8 @@ Advanced search with specific field filters.
 | `page_size` | int | No | Results per page |
 
 ### `get_paper`
-Get detailed information about a specific arXiv paper.
+Get detailed information about a specific arXiv paper. Optional `primary_category`, `comment`,
+`journal_ref`, `doi` and integer `version` come directly from the Atom feed and are omitted when absent.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|

@@ -186,6 +186,8 @@ def _parse_atom(xml_text: str) -> tuple[list[Paper], int]:
 			raise ValueError(f"arXiv API error: {_text(entry.find('atom:summary', _NS))}")
 
 		id_arxiv = _VERSION_RE.sub("", extract_paper_id(raw_id) or raw_id)
+		version = _VERSION_RE.search(raw_id)
+		primary = entry.find("arxiv:primary_category", _NS)
 		categories = [c.get("term", "") for c in entry.findall("atom:category", _NS)]
 		papers.append(
 			Paper(
@@ -198,6 +200,11 @@ def _parse_atom(xml_text: str) -> tuple[list[Paper], int]:
 				url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
 				date_published=_text(entry.find("atom:published", _NS)) or None,
 				date_updated=_text(entry.find("atom:updated", _NS)) or None,
+				primary_category=primary.get("term") or None if primary is not None else None,
+				comment=_text(entry.find("arxiv:comment", _NS)) or None,
+				journal_ref=_text(entry.find("arxiv:journal_ref", _NS)) or None,
+				doi=_text(entry.find("arxiv:doi", _NS)) or None,
+				version=int(version.group()[1:]) if version else None,
 			)
 		)
 	return papers, total

@@ -16,6 +16,11 @@ class Paper(BaseModel):
 	url_pdf: str = Field(description="URL to the PDF")
 	date_published: Optional[str] = Field(default=None, description="Publication date")
 	date_updated: Optional[str] = Field(default=None, description="Last updated date")
+	primary_category: Optional[str] = Field(default=None, exclude_if=lambda v: v is None, description="Primary arXiv category")
+	comment: Optional[str] = Field(default=None, exclude_if=lambda v: v is None, description="Author comment")
+	journal_ref: Optional[str] = Field(default=None, exclude_if=lambda v: v is None, description="Journal reference as supplied by arXiv")
+	doi: Optional[str] = Field(default=None, exclude_if=lambda v: v is None, description="DOI")
+	version: Optional[int] = Field(default=None, exclude_if=lambda v: v is None, description="Version number from the feed ID")
 
 
 class SearchResult(BaseModel):

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Include optional primary category, comment, journal reference, DOI and feed version in paper metadata;
+  omit these fields when unavailable.
+
 - Read full paper text from canonical arXiv PDF URLs through Jina, not abstract pages.
 - Reject malformed paper IDs and traversal/encoded-path URLs before making content requests.
 - Report transport failures clearly; retry GETs once on HTTP 429/503/406 with capped `Retry-After`
