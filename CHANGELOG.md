@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add optional `abstract_max_chars` on `search`, `search_advanced`, and `get_recent`:
+  `0` removes abstract text, positive values truncate it, and omitted/`null` keeps full
+  abstracts. Result-count defaults and full cached metadata are unchanged.
+
 - Add `read_paper` for outlines plus abstracts, named sections and 10,000-character fallback
   chunks, sharing the full-text cache. Cap responses (default 12,000 characters including
   the marker; minimum 256) and provide lossless continuation via `offset`.

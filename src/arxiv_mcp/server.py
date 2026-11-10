@@ -213,15 +213,27 @@ async def _get(
 		raise ValueError(f"{service} request exceeded its {timeout:g}-second time limit. Try again later.") from exc
 
 
-async def _query_atom(params: dict[str, str], page: int = 1, page_size: int = 25) -> SearchResult:
-	"""Call the arXiv Atom API; `params` holds search_query/id_list/sortBy/sortOrder."""
+def _compact_result(result: SearchResult, abstract_max_chars: Optional[int]) -> SearchResult:
+	if abstract_max_chars is not None:
+		for paper in result.papers:
+			paper.abstract = paper.abstract[:abstract_max_chars]
+	return result
+
+
+async def _query_atom(
+	params: dict[str, str], page: int = 1, page_size: int = 25, *,
+	abstract_max_chars: Optional[int] = None,
+) -> SearchResult:
+	"""Call the arXiv Atom API; cache full metadata, then project caller-owned results."""
+	if abstract_max_chars is not None and abstract_max_chars < 0:
+		raise ValueError("abstract_max_chars must be non-negative (0 removes abstract text)")
 	page = max(page, 1)
 	page_size = max(1, min(page_size, MAX_PAGE_SIZE))
 	request_params = {**params, "start": str((page - 1) * page_size), "max_results": str(page_size)}
 	key = tuple(sorted(request_params.items()))
 	hit = _cache_get(_atom_cache, key)
 	if hit is not None:
-		return hit.model_copy(deep=True)
+		return _compact_result(hit.model_copy(deep=True), abstract_max_chars)
 
 	response = await _get(URL_EXPORT, params=request_params, timeout=TIMEOUT)
 	papers, total = _parse_atom(response.text)
@@ -234,7 +246,7 @@ async def _query_atom(params: dict[str, str], page: int = 1, page_size: int = 25
 	)
 	recent = params.get("sortBy") in {"submittedDate", "lastUpdatedDate"} and params.get("sortOrder") == "descending"
 	_cache_put(_atom_cache, key, result.model_copy(deep=True), ATOM_RECENT_TTL if recent else ATOM_TTL, ATOM_CACHE_SIZE)
-	return result
+	return _compact_result(result, abstract_max_chars)
 
 
 def _sort_params(sort_by: str) -> dict[str, str]:
@@ -267,11 +279,13 @@ async def search(
 	sort_by: str = "relevance",
 	page: int = 1,
 	page_size: int = 25,
+	abstract_max_chars: Optional[int] = None,
 ) -> SearchResult:
 	"""
 	Search arXiv for papers matching the query.
 
 	Args:
+		abstract_max_chars: Abstract character cap; None keeps full text, 0 returns an empty abstract
 		query: Search query for arXiv papers (e.g., 'LLM', 'transformer architecture')
 		category: Filter by arXiv category (e.g., 'cs.AI', 'cs.LG', 'stat.ML')
 		author: Filter by author name
@@ -290,7 +304,10 @@ async def search(
 	if not terms:
 		raise ValueError("A query, author or category is required")
 
-	return await _query_atom({"search_query": " AND ".join(terms), **sort}, page, page_size)
+	return await _query_atom(
+		{"search_query": " AND ".join(terms), **sort}, page, page_size,
+		abstract_max_chars=abstract_max_chars,
+	)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -305,11 +322,13 @@ async def search_advanced(
 	sort_by: str = "relevance",
 	page: int = 1,
 	page_size: int = 25,
+	abstract_max_chars: Optional[int] = None,
 ) -> SearchResult:
 	"""
 	Advanced search with specific field filters.
 
 	Args:
+		abstract_max_chars: Abstract character cap; None keeps full text, 0 returns an empty abstract
 		title: Search in paper titles
 		abstract: Search in abstracts
 		author: Search by author name
@@ -341,7 +360,7 @@ async def search_advanced(
 	if terms:
 		params["search_query"] = " AND ".join(terms)
 
-	return await _query_atom(params, page, page_size)
+	return await _query_atom(params, page, page_size, abstract_max_chars=abstract_max_chars)
 
 
 def _api_id(id_arxiv: str) -> str:
@@ -487,19 +506,23 @@ async def list_categories() -> list[Category]:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def get_recent(category: str = "cs.AI", count: int = 10) -> RecentPapers:
+async def get_recent(
+	category: str = "cs.AI", count: int = 10, abstract_max_chars: Optional[int] = None,
+) -> RecentPapers:
 	"""
 	Get recent papers from a specific arXiv category.
 
 	Args:
 		category: arXiv category code (default: 'cs.AI')
 		count: Number of papers to retrieve (max 50, default: 10)
+		abstract_max_chars: Abstract character cap; None keeps full text, 0 returns an empty abstract
 
 	Returns:
 		Recent papers from the specified category
 	"""
 	result = await _query_atom(
-		{"search_query": f"cat:{category}", **_sort_params("date_desc")}, page_size=count
+		{"search_query": f"cat:{category}", **_sort_params("date_desc")}, page_size=count,
+		abstract_max_chars=abstract_max_chars,
 	)
 	return RecentPapers(
 		category=category,

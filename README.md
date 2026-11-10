@@ -6,6 +6,7 @@ A Model Context Protocol (MCP) server that provides arXiv paper search and retri
 
 - Search papers by query, author, category, and date
 - Advanced search with specific field filters
+- Compact search: optional abstract character caps without changing full-result defaults
 - Get detailed paper metadata, batch lookups and metadata-only BibTeX citations
 - Read outlines, named sections or fixed-size chunks with a strict character cap
 - Retrieve full paper content through server-backed MCP resource links without embedding large papers in tool results
@@ -42,6 +43,8 @@ Advanced search with specific field filters.
 | `sort_by` | string | No | Same options as `search` |
 | `page` | int | No | Page number |
 | `page_size` | int | No | Results per page |
+
+`search` and `search_advanced` also accept `abstract_max_chars`: omit it for full abstracts (the default), set `0` for empty abstract text, or a positive integer to truncate each abstract to that many characters. The same option works on `get_recent`. All other paper fields and pagination stay intact; cached metadata and `get_paper` always retain full abstracts. Defaults remain 25 search results and 10 recent papers.
 
 ### `get_paper`
 Get detailed information about a specific arXiv paper. Optional `primary_category`, `comment`,
