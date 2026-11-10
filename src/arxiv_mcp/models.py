@@ -30,6 +30,13 @@ class PaperBatch(BaseModel):
 	missing_ids: list[str]
 
 
+class BibtexExport(BaseModel):
+	"""Metadata-only citations and IDs for which no citation could be made."""
+
+	bibtex: str
+	missing_ids: list[str]
+
+
 class SearchResult(BaseModel):
 	"""Search result containing papers and metadata."""
 

@@ -66,6 +66,69 @@ async def test_batch_maximum_and_mcp_output(atom_api):
     assert atom_api.params()["max_results"] == "50"
 
 
+@pytest.mark.asyncio
+async def test_bibtex_uses_api_metadata_deduplicates_versions_and_escapes(atom_api):
+    atom_api.body = _feed(_entry(
+        title="Toy {A} &amp; 50%_ $ # ~ ^ \\ café",
+        authors=("Zoë {Example} &amp; Co_50%", "李 Example"),
+    ).replace(
+        "</entry>",
+        "<arxiv:doi>10.0000/toy_1</arxiv:doi>"
+        "<arxiv:journal_ref>Example Journal 1 (2024)</arxiv:journal_ref></entry>",
+    ))
+    result = await server.export_bibtex(["2401.00001v1", "https://arxiv.org/abs/2401.00001v2", "2401.99999"])
+    assert atom_api.params()["id_list"] == "2401.00001,2401.99999"
+    assert len(atom_api.requests) == 1
+    assert result.missing_ids == ["2401.99999"]
+    text = result.bibtex
+    assert text.count("@misc{") == 1
+    assert "@misc{arxiv:2401.00001," in text
+    assert r"title = {Toy \{A\} \& 50\%\_ \$ \# \textasciitilde{} \textasciicircum{} \textbackslash{} café}" in text
+    assert r"author = {Zoë \{Example\} \& Co\_50\% and 李 Example}" in text
+    for field in (
+        "year = {2024}", "eprint = {2401.00001}", "archivePrefix = {arXiv}",
+        "primaryClass = {cs.LG}", r"doi = {10.0000/toy\_1}",
+        "note = {Example Journal 1 (2024)}",
+    ):
+        assert field in text
+
+
+@pytest.mark.asyncio
+async def test_bibtex_missing_optional_fields_are_not_invented(atom_api):
+    atom_api.body = _feed(_entry(abs_id="hep-th/9901001v1", cats=("hep-th",), published="").replace(
+        '<arxiv:primary_category term="hep-th"/>', "",
+    ))
+    result = await server.export_bibtex(["hep-th/9901001"])
+    assert "@misc{arxiv:hep-th/9901001," in result.bibtex
+    assert "eprint = {hep-th/9901001}" in result.bibtex
+    for field in ("year =", "primaryClass =", "doi =", "note ="):
+        assert field not in result.bibtex
+
+
+@pytest.mark.asyncio
+async def test_bibtex_key_is_stable_across_versions(atom_api):
+    atom_api.body = _feed(_entry())
+    first = await server.export_bibtex(["2401.00001v1"])
+    second = await server.export_bibtex(["2401.00001v9"])
+    assert first == second
+    assert len(atom_api.requests) == 1  # same canonical batch cache entry
+
+
+@pytest.mark.asyncio
+async def test_bibtex_all_missing_and_mcp_contract(atom_api):
+    result = await server.mcp.call_tool("export_bibtex", {"ids": ["2401.99999"]})
+    assert not result.is_error
+    assert result.structured_content == {"bibtex": "", "missing_ids": ["2401.99999"]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ids", [[], ["bad"], ["2401.00001"] * 51])
+async def test_bibtex_validates_before_http(atom_api, ids):
+    with pytest.raises(ValueError):
+        await server.export_bibtex(ids)
+    assert atom_api.requests == []
+
+
 def test_parse_optional_metadata():
     entry = _entry().replace(
         "</entry>",

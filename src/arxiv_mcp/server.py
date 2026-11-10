@@ -11,7 +11,6 @@ import asyncio
 import re
 import time
 import urllib.parse
-import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Optional, TypeVar
@@ -26,7 +25,7 @@ from openai_mcp_extensions import (
 	OpenAIMentionSearchResult,
 )
 
-from .metadata import get_papers
+from .metadata import _parse_atom, clean_text, export_bibtex, get_papers
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
@@ -137,23 +136,11 @@ def extract_paper_id(url: str) -> Optional[str]:
 	return match.group("id") if match else None
 
 
-def clean_text(text: str) -> str:
-	"""Clean and normalize text content."""
-	text = text.replace("\n", " ")
-	text = " ".join(text.split())
-	return text.strip()
-
-
 ARXIV_MIN_INTERVAL = 3.0  # arXiv API terms: at most one request per 3 seconds
 USER_AGENT = "arxiv-mcp (+https://github.com/Ray0907/arXiv-mcp)"
 _rate_lock = asyncio.Lock()
 _last_request = 0.0
 
-_NS = {
-	"atom": "http://www.w3.org/2005/Atom",
-	"opensearch": "http://a9.com/-/spec/opensearch/1.1/",
-	"arxiv": "http://arxiv.org/schemas/atom",
-}
 _VERSION_RE = re.compile(r"v\d+$")
 MAX_PAGE_SIZE = 50
 ATOM_TTL = 300.0
@@ -171,50 +158,6 @@ _STOPWORDS = frozenset(
 	"a an and are as at be but by for if in into is it no not of on or such that the their then there these they this to was will with".split()
 )
 _FIELD_SYNTAX_RE = re.compile(r"\b(?:all|ti|au|abs|co|jr|cat|rn):", re.IGNORECASE)
-
-
-def _text(node: Optional[ET.Element]) -> str:
-	return clean_text(node.text or "") if node is not None else ""
-
-
-def _parse_atom(xml_text: str) -> tuple[list[Paper], int]:
-	"""Parse an arXiv API Atom feed into papers and the opensearch total."""
-	try:
-		root = ET.fromstring(xml_text)
-	except ET.ParseError as exc:
-		raise ValueError("arXiv returned an unparseable response. Try again later.") from exc
-
-	total = int(_text(root.find("opensearch:totalResults", _NS)) or 0)
-	papers = []
-	for entry in root.findall("atom:entry", _NS):
-		raw_id = _text(entry.find("atom:id", _NS))
-		# Invalid requests come back as HTTP 200 with one entry titled "Error".
-		if _text(entry.find("atom:title", _NS)) == "Error" and "/api/errors" in raw_id:
-			raise ValueError(f"arXiv API error: {_text(entry.find('atom:summary', _NS))}")
-
-		id_arxiv = _VERSION_RE.sub("", extract_paper_id(raw_id) or raw_id)
-		version = _VERSION_RE.search(raw_id)
-		primary = entry.find("arxiv:primary_category", _NS)
-		categories = [c.get("term", "") for c in entry.findall("atom:category", _NS)]
-		papers.append(
-			Paper(
-				id_arxiv=id_arxiv,
-				title=_text(entry.find("atom:title", _NS)),
-				abstract=_text(entry.find("atom:summary", _NS)),
-				authors=[_text(n) for n in entry.findall("atom:author/atom:name", _NS)],
-				categories=[c for c in categories if c],
-				url_abstract=f"{URL_BASE}/abs/{id_arxiv}",
-				url_pdf=f"{URL_BASE}/pdf/{id_arxiv}.pdf",
-				date_published=_text(entry.find("atom:published", _NS)) or None,
-				date_updated=_text(entry.find("atom:updated", _NS)) or None,
-				primary_category=primary.get("term") or None if primary is not None else None,
-				comment=_text(entry.find("arxiv:comment", _NS)) or None,
-				journal_ref=_text(entry.find("arxiv:journal_ref", _NS)) or None,
-				doi=_text(entry.find("arxiv:doi", _NS)) or None,
-				version=int(version.group()[1:]) if version else None,
-			)
-		)
-	return papers, total
 
 
 async def _throttle() -> None:
@@ -439,6 +382,7 @@ async def get_paper(id_or_url: str) -> Paper:
 
 
 mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_papers)
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(export_bibtex)
 
 
 def _content_id(id_or_url: str) -> str:

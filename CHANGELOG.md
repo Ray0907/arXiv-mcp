@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add metadata-only `export_bibtex(ids)`, with stable cite keys, version deduplication,
+  escaped fields, DOI/journal references and explicit missing IDs.
+
 - Add `get_papers(ids)` for one-request batches of up to 50 IDs, with explicit missing IDs.
 
 - Include optional primary category, comment, journal reference, DOI and feed version in paper metadata;

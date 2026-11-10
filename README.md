@@ -60,6 +60,15 @@ locally. Exact duplicates are collapsed; legacy pinned IDs use latest metadata, 
 |----------|------|----------|-------------|
 | `ids` | list of strings | Yes | 1–50 arXiv IDs or URLs |
 
+### `export_bibtex`
+Export API-derived UTF-8 BibTeX as `{bibtex, missing_ids}`; no citation text is invented.
+Accepts `ids` (1–50 IDs/URLs), deduplicates versions and looks up the latest metadata using
+`get_papers`. Stable cite keys are `arxiv:<versionless ID>` (e.g. `arxiv:hep-th/9901001`).
+Entries use `@misc`, arXiv `eprint`/`archivePrefix`/`primaryClass`, and DOI when supplied.
+The complete, unparsed `journal_ref` goes in `note` rather than guessing journal/volume/pages.
+BibTeX special characters are escaped as literal text (including raw LaTeX); Unicode names
+and titles are retained, for UTF-8-capable bibliography tools such as Biber.
+
 ### `get_content`
 Validate the paper ID locally (no HTTP request), then return an `arxiv://` MCP resource link. Clients read the link through `resources/read`; only that read fetches the canonical PDF through Jina Reader. Paper text is never embedded in the tool result. Upstream failures, including a missing PDF (HTTP 404), surface as readable resource-read errors rather than tool-validation errors. A server-backed custom URI is used because MCP does not require every client to fetch external `https://` resource links directly.
 
