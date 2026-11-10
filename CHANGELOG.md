@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add bounded `get_references` and `get_citations` via Semantic Scholar Graph API, returning
+  compact neighbor metadata and `has_more`. Reuse shared GET deadlines/retries with a separate
+  1-second request slot and 128-entry, 5-minute cache. Report missing papers, rate limits and
+  upstream failures clearly; accept optional `SEMANTIC_SCHOLAR_API_KEY` only in request headers,
+  with redirects disabled and upstream exception details suppressed to protect credentials.
+
 - Add stateless `get_recent(since="YYYY-MM-DD")` using inclusive UTC submission-date
   bounds and the shared advanced-search cache. Reject invalid/future dates; expose
   `total_results` and `has_more` so count-limited windows are not silently truncated.

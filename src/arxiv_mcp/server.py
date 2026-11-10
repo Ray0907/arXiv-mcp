@@ -28,6 +28,8 @@ from openai_mcp_extensions import (
 from .metadata import _parse_atom, clean_text, export_bibtex, get_papers
 from .reading import read_paper
 from .discovery import get_recent
+from . import graph
+from .graph import get_references, get_citations
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
@@ -125,9 +127,20 @@ _ARXIV_ID_RE = re.compile(
 )
 
 
+def _service_name(url: str) -> str:
+	if url.startswith(graph.URL_GRAPH + "/"):
+		return "Semantic Scholar"
+	return "arXiv" if url == URL_EXPORT or url.startswith(URL_EXPORT + "?") else "Jina Reader"
+
+
 def _http_error(exc: httpx.HTTPStatusError) -> ValueError:
 	code = exc.response.status_code
-	service = "Jina Reader" if exc.request.url.host == "r.jina.ai" else "arXiv"
+	service = _service_name(str(exc.request.url))
+	if service == "Semantic Scholar":
+		if code == 404:
+			return ValueError("Paper not found in Semantic Scholar (HTTP 404); it may still exist on arXiv.")
+		if code == 429:
+			return ValueError("Semantic Scholar returned HTTP 429: shared rate limit reached. Try again later or set SEMANTIC_SCHOLAR_API_KEY.")
 	return ValueError(f"{service} returned HTTP {code}. Try adjusting your query or try again later.")
 
 
@@ -184,17 +197,21 @@ def _retry_delay(response: httpx.Response) -> float:
 
 async def _get(
 	url: str, *, params: Optional[dict[str, str]] = None, timeout: float,
+	headers: Optional[dict[str, str]] = None,
 ) -> httpx.Response:
 	"""GET only; the deadline includes throttle, body reads and one status retry."""
-	service = "arXiv" if url == URL_EXPORT else "Jina Reader"
+	service = _service_name(url)
 
 	async def request() -> httpx.Response:
 		async with httpx.AsyncClient(
-			timeout=timeout, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
+			timeout=timeout, headers={"User-Agent": USER_AGENT, **(headers or {})},
+			follow_redirects=service != "Semantic Scholar",  # Never forward x-api-key to a redirect.
 		) as client:
 			for attempt in range(2):
 				if url == URL_EXPORT:
 					await _throttle()
+				elif service == "Semantic Scholar":
+					await graph._throttle()
 				response = await client.get(url, params=params)
 				if attempt == 0 and response.status_code in {429, 503, 406}:
 					await asyncio.sleep(_retry_delay(response))
@@ -205,12 +222,12 @@ async def _get(
 	try:
 		return await asyncio.wait_for(request(), timeout=timeout)
 	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
+		raise _http_error(exc) from None
 	except httpx.TransportError as exc:
 		reason = "request timed out" if isinstance(exc, httpx.TimeoutException) else "could not be reached"
-		raise ValueError(f"{service} {reason}. Try again later.") from exc
+		raise ValueError(f"{service} {reason}. Try again later.") from None
 	except asyncio.TimeoutError as exc:
-		raise ValueError(f"{service} request exceeded its {timeout:g}-second time limit. Try again later.") from exc
+		raise ValueError(f"{service} request exceeded its {timeout:g}-second time limit. Try again later.") from None
 
 
 def _compact_result(result: SearchResult, abstract_max_chars: Optional[int]) -> SearchResult:
@@ -506,6 +523,8 @@ async def list_categories() -> list[Category]:
 
 
 mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_recent)
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_references)
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_citations)
 
 
 def main():

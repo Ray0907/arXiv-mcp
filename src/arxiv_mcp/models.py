@@ -69,6 +69,23 @@ class RecentPapers(BaseModel):
 	has_more: bool = Field(default=False, description="Whether the count limit omitted matching papers")
 
 
+class RelatedPaper(BaseModel):
+	"""Compact Semantic Scholar metadata; neighbors need not have an arXiv ID."""
+
+	title: str
+	id_arxiv: Optional[str] = None
+	year: Optional[int] = None
+	authors: list[str] = Field(default_factory=list)
+
+
+class RelatedPapers(BaseModel):
+	"""A bounded graph sample, not an exhaustive bibliography or citation count."""
+
+	id_arxiv: str
+	papers: list[RelatedPaper]
+	has_more: bool = False
+
+
 class Category(BaseModel):
 	"""arXiv category information."""
 

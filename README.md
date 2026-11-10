@@ -10,7 +10,8 @@ A Model Context Protocol (MCP) server that provides arXiv paper search and retri
 - Get detailed paper metadata, batch lookups and metadata-only BibTeX citations
 - Read outlines, named sections or fixed-size chunks with a strict character cap
 - Retrieve full paper content through server-backed MCP resource links without embedding large papers in tool results
-- Browse recent papers by category
+- Browse recent papers by category with stateless inclusive UTC date windows
+- Discover references and citing papers through Semantic Scholar
 - List all arXiv categories
 - Pagination support for search results
 
@@ -116,6 +117,33 @@ Get recent papers from a specific arXiv category.
 | `abstract_max_chars` | int | No | Abstract character cap; `0` returns empty text, omitted/`null` keeps full abstracts |
 
 The response includes `count` (returned papers), `total_results` (all matches in the window), and `has_more` (the count limit omitted matches). `since` is stateless: there is no saved watch or cursor. For example, `get_recent(category="cs.LG", since="2024-02-29", count=5)` returns at most five newest matches, not every paper since that date. To continue, use `search_advanced(category="cs.LG", date_from="2024-02-29", sort_by="date_desc", page=2, page_size=5)`; keep the same `date_to` UTC day if continuing across midnight. Dates include the start day's `00:00` and end day's `23:59` arXiv API boundaries.
+
+### `get_references` / `get_citations`
+Get papers cited **by** a paper (`get_references`) or papers that **cite** it (`get_citations`),
+using the [Semantic Scholar Graph API](https://api.semanticscholar.org/api-docs/graph).
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id_or_url` | string | Yes | arXiv ID or arxiv.org abstract/PDF URL; versions resolve to the same graph paper |
+| `limit` | int | No | Maximum edges inspected, 1–50 (default: 10); invalid limits fail locally |
+
+Returns `{id_arxiv, papers, has_more}`. Each compact neighbor has `title`, `id_arxiv` (or `null`
+if unavailable), `year` (or `null`), and author names. Unresolved/null edges are skipped, so the
+number of returned papers may be smaller than `limit`. `has_more` reports remaining upstream
+edges; these tools provide a sample, not full pagination or total citation counts. Increase
+`limit` up to 50 for a larger sample. Semantic Scholar coverage can be incomplete or delayed;
+HTTP 404 explicitly means absent there, **not** absent from arXiv.
+
+Graph requests use the shared transport deadlines/retries but a separate 1-second per-process
+request slot, never arXiv's 3-second slot. Cache up to 128 successful graph responses for 5 minutes,
+keyed by versionless ID, direction, and limit. Failures are not cached. Unauthenticated users
+share Semantic Scholar's global rate limit: HTTP 429 gives a readable retry-later error after
+at most one retry, not a guarantee of access. Transport/body/throttle/retry waits share a
+30-second deadline; 5xx errors are readable too.
+
+Optionally set `SEMANTIC_SCHOLAR_API_KEY` in the server process environment (or the MCP server
+configuration's `env` object). It is sent only as `x-api-key`, never in URLs or error messages;
+graph redirects are not followed to prevent forwarding it to another host. Do not commit keys.
 
 ### `list_categories`
 List all common arXiv categories with their codes and names.
