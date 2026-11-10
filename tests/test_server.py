@@ -158,7 +158,7 @@ async def test_get_content_returns_jina_resource_link(monkeypatch, id_or_url, re
     from mcp.types import ResourceLink
     from arxiv_mcp.server import mcp
 
-    jina_url = "https://r.jina.ai/https://arxiv.org/abs/2301.00001"
+    jina_url = "https://r.jina.ai/https://arxiv.org/pdf/2301.00001"
     requests = []
 
     class UnreadableStream(httpx.AsyncByteStream):

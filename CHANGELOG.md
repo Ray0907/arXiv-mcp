@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Read full paper text from canonical arXiv PDF URLs through Jina, not abstract pages.
+- Reject malformed paper IDs and traversal/encoded-path URLs before making content requests.
+
 ## v0.5.0
 
 **Breaking Changes:**

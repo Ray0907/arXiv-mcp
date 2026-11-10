@@ -54,7 +54,7 @@ Validate an arXiv paper through a streamed Jina Reader request, then return an `
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
-| `id_or_url` | string | Yes | arXiv ID or full URL |
+| `id_or_url` | string | Yes | Valid arXiv ID or arxiv.org abstract/PDF URL; Jina reads the canonical PDF, not the abstract page |
 
 ### `get_recent`
 Get recent papers from a specific arXiv category.

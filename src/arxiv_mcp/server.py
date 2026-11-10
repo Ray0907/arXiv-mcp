@@ -349,14 +349,14 @@ async def get_paper(id_or_url: str) -> Paper:
 
 
 def _jina_url(id_or_url: str) -> str:
-	if id_or_url.startswith('https://') or id_or_url.startswith('http://'):
+	id_or_url = id_or_url.strip()
+	if id_or_url.startswith(('https://', 'http://')):
 		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
 			raise ValueError(f'URL must point to arxiv.org, got: {id_or_url}')
-		url_target = id_or_url
-	else:
-		id_arxiv = extract_paper_id(id_or_url)
-		url_target = f'{URL_BASE}/abs/{id_arxiv or id_or_url}'
-	return f"{URL_JINA}/{url_target}"
+	id_arxiv = extract_paper_id(id_or_url)
+	if not id_arxiv:
+		raise ValueError(f"Could not extract arXiv ID from: {id_or_url}")
+	return f"{URL_JINA}/{URL_BASE}/pdf/{id_arxiv}"
 
 
 @mcp.resource(
