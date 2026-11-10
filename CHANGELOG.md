@@ -1,41 +1,28 @@
 # Changelog
 
-## Unreleased
+## v0.6.0
 
-- Add bounded `get_references` and `get_citations` via Semantic Scholar Graph API, returning
-  compact neighbor metadata and `has_more`. Reuse shared GET deadlines/retries with a separate
-  1-second request slot and 128-entry, 5-minute cache. Report missing papers, rate limits and
-  upstream failures clearly; accept optional `SEMANTIC_SCHOLAR_API_KEY` only in request headers,
-  with redirects disabled and upstream exception details suppressed to protect credentials.
+**Breaking Changes:**
+- `get_content` validates the ID locally and no longer contacts Jina; a missing paper or upstream
+  failure now surfaces when the `arxiv://content/...` resource is read
+- Malformed paper IDs and non-arXiv or traversal URLs are rejected before any content request
 
-- Add stateless `get_recent(since="YYYY-MM-DD")` using inclusive UTC submission-date
-  bounds and the shared advanced-search cache. Reject invalid/future dates; expose
-  `total_results` and `has_more` so count-limited windows are not silently truncated.
+**New Tools:**
+- `read_paper`: outline plus abstract by default, named sections or 10,000-character chunks,
+  capped output (default 12,000 characters) with `offset` continuation
+- `get_papers`: up to 50 IDs in one request, reporting `missing_ids`
+- `export_bibtex`: BibTeX built from arXiv metadata only, with stable keys, version dedupe and escaping
+- `get_references` / `get_citations`: compact citation graph via Semantic Scholar; optional
+  `SEMANTIC_SCHOLAR_API_KEY` is sent only as a request header
 
-- Add optional `abstract_max_chars` on `search`, `search_advanced`, and `get_recent`:
-  `0` removes abstract text, positive values truncate it, and omitted/`null` keeps full
-  abstracts. Result-count defaults and full cached metadata are unchanged.
-
-- Add `read_paper` for outlines plus abstracts, named sections and 10,000-character fallback
-  chunks, sharing the full-text cache. Cap responses (default 12,000 characters including
-  the marker; minimum 256) and provide lossless continuation via `offset`.
-
-- Add metadata-only `export_bibtex(ids)`, with stable cite keys, version deduplication,
-  escaped fields, DOI/journal references and explicit missing IDs.
-
-- Add `get_papers(ids)` for one-request batches of up to 50 IDs, with explicit missing IDs.
-
-- Include optional primary category, comment, journal reference, DOI and feed version in paper metadata;
-  omit these fields when unavailable.
-
-- Read full paper text from canonical arXiv PDF URLs through Jina, not abstract pages.
-- Reject malformed paper IDs and traversal/encoded-path URLs before making content requests.
-- Report transport failures clearly; retry GETs once on HTTP 429/503/406 with capped `Retry-After`
-  and total deadlines, preserving arXiv request spacing without duplicate throttle waits.
-- Bound Atom and mention caches to 128 entries each, with TTL expiry and shorter freshness windows
-  for newest-first searches. Keep paginated/versioned lookups distinct and cached results isolated.
-- Make `get_content` local-only; fetch once on resource read and cache up to 32 full texts by ID
-  (1 hour unversioned, 24 hours versioned). Preserve `arxiv://` links and readable resource errors.
+**Improvements:**
+- Full text now comes from the arXiv PDF through Jina; previously only the abstract page was read
+- `get_recent` accepts `since="YYYY-MM-DD"` (UTC) and returns `total_results` and `has_more`
+- `search`, `search_advanced` and `get_recent` accept `abstract_max_chars` to shorten or drop abstracts
+- Papers include primary category, comment, journal reference, DOI and version when available
+- Transport errors are reported clearly; HTTP 429/503/406 are retried once with capped `Retry-After`
+  and a total deadline per call
+- Query results (128 entries, 1–5 minutes) and full texts (32 papers, 1–24 hours) are cached
 
 ## v0.5.0
 
