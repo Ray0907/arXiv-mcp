@@ -65,6 +65,8 @@ class RecentPapers(BaseModel):
 	category_name: str = Field(description="Full category name")
 	count: int = Field(description="Number of papers returned")
 	papers: list[Paper] = Field(description="List of recent papers")
+	total_results: int = Field(default=0, description="Total matches in the category/date window")
+	has_more: bool = Field(default=False, description="Whether the count limit omitted matching papers")
 
 
 class Category(BaseModel):

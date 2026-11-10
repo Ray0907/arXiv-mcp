@@ -111,7 +111,11 @@ Get recent papers from a specific arXiv category.
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|
 | `category` | string | No | Category code (default: 'cs.AI') |
-| `count` | int | No | Number of papers, max 50 (default: 10) |
+| `count` | int | No | Maximum papers, clamped to 1–50 (default: 10) |
+| `since` | string | No | Inclusive submission date, strict `YYYY-MM-DD`, through today in UTC; future dates rejected |
+| `abstract_max_chars` | int | No | Abstract character cap; `0` returns empty text, omitted/`null` keeps full abstracts |
+
+The response includes `count` (returned papers), `total_results` (all matches in the window), and `has_more` (the count limit omitted matches). `since` is stateless: there is no saved watch or cursor. For example, `get_recent(category="cs.LG", since="2024-02-29", count=5)` returns at most five newest matches, not every paper since that date. To continue, use `search_advanced(category="cs.LG", date_from="2024-02-29", sort_by="date_desc", page=2, page_size=5)`; keep the same `date_to` UTC day if continuing across midnight. Dates include the start day's `00:00` and end day's `23:59` arXiv API boundaries.
 
 ### `list_categories`
 List all common arXiv categories with their codes and names.

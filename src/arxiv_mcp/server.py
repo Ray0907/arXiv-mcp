@@ -27,12 +27,12 @@ from openai_mcp_extensions import (
 
 from .metadata import _parse_atom, clean_text, export_bibtex, get_papers
 from .reading import read_paper
+from .discovery import get_recent
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
 	Category,
 	Paper,
-	RecentPapers,
 	SearchResult,
 )
 
@@ -505,31 +505,7 @@ async def list_categories() -> list[Category]:
 	return _CATEGORIES_CACHE
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
-async def get_recent(
-	category: str = "cs.AI", count: int = 10, abstract_max_chars: Optional[int] = None,
-) -> RecentPapers:
-	"""
-	Get recent papers from a specific arXiv category.
-
-	Args:
-		category: arXiv category code (default: 'cs.AI')
-		count: Number of papers to retrieve (max 50, default: 10)
-		abstract_max_chars: Abstract character cap; None keeps full text, 0 returns an empty abstract
-
-	Returns:
-		Recent papers from the specified category
-	"""
-	result = await _query_atom(
-		{"search_query": f"cat:{category}", **_sort_params("date_desc")}, page_size=count,
-		abstract_max_chars=abstract_max_chars,
-	)
-	return RecentPapers(
-		category=category,
-		category_name=ARXIV_CATEGORIES.get(category, category),
-		count=len(result.papers),
-		papers=result.papers,
-	)
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_recent)
 
 
 def main():

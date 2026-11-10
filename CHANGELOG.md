@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add stateless `get_recent(since="YYYY-MM-DD")` using inclusive UTC submission-date
+  bounds and the shared advanced-search cache. Reject invalid/future dates; expose
+  `total_results` and `has_more` so count-limited windows are not silently truncated.
+
 - Add optional `abstract_max_chars` on `search`, `search_advanced`, and `get_recent`:
   `0` removes abstract text, positive values truncate it, and omitted/`null` keeps full
   abstracts. Result-count defaults and full cached metadata are unchanged.
