@@ -6,6 +6,8 @@
 - Reject malformed paper IDs and traversal/encoded-path URLs before making content requests.
 - Report transport failures clearly; retry GETs once on HTTP 429/503/406 with capped `Retry-After`
   and total deadlines, preserving arXiv request spacing without duplicate throttle waits.
+- Bound Atom and mention caches to 128 entries each, with TTL expiry and shorter freshness windows
+  for newest-first searches. Keep paginated/versioned lookups distinct and cached results isolated.
 
 ## v0.5.0
 

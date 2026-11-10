@@ -82,6 +82,9 @@ List all common arXiv categories with their codes and names.
 - arXiv and Jina transport failures surface as readable errors. GET requests retry once on HTTP
   429, 503 or 406, using `Retry-After` (seconds or HTTP date, capped at 10 seconds; default 1 second).
   Total deadlines include rate-limit and retry waits: 30 seconds for arXiv, 60 seconds for Jina.
+- Per-process FIFO caches keep up to 128 Atom responses and 128 mention queries. Atom responses
+  expire after 5 minutes (1 minute for `date_desc` and `updated_desc`); mentions expire after 5 minutes.
+  Atom cache keys include all outgoing parameters, including page, page size and sort order.
 
 ## Installation
 

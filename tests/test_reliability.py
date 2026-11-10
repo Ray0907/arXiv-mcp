@@ -208,3 +208,145 @@ async def test_total_deadline_covers_all_waits(phase, mock_http, monkeypatch):
     with pytest.raises(ValueError, match=r"arXiv.*time limit"):
         await asyncio.wait_for(fetch("atom"), timeout=0.3)
     assert len(calls) == (0 if phase == "throttle" else 1)
+
+
+@pytest.mark.asyncio
+async def test_atom_cache_uses_sorted_complete_request_params(mock_http):
+    calls = []
+
+    def respond(request):
+        calls.append(dict(request.url.params))
+        return httpx.Response(200, text=EMPTY_FEED)
+
+    mock_http(respond)
+    params = {"search_query": "all:mock", "sortBy": "relevance", "sortOrder": "descending"}
+    await server._query_atom(params)
+    await server._query_atom(dict(reversed(list(params.items()))))
+    assert len(calls) == 1
+    await server._query_atom(params, page=2)
+    await server._query_atom(params, page_size=10)
+    await server._query_atom({**params, "sortOrder": "ascending"})
+    await server._query_atom({"id_list": "1706.03762v1"})
+    await server._query_atom({"id_list": "1706.03762v2"})
+    assert len(calls) == 6
+    # Clamped pages and sizes describe the same outgoing request.
+    await server._query_atom(params, page=0, page_size=100)
+    await server._query_atom(params, page=1, page_size=50)
+    assert len(calls) == 7
+
+
+@pytest.mark.parametrize(
+    "sort_by, order, fresh_at_61",
+    [("relevance", "descending", True), ("submittedDate", "descending", False),
+     ("lastUpdatedDate", "descending", False), ("submittedDate", "ascending", True)],
+)
+@pytest.mark.asyncio
+async def test_atom_cache_ttl_is_shorter_for_recent_sorts(sort_by, order, fresh_at_61, mock_http, monkeypatch):
+    now, calls = [100.0], []
+    monkeypatch.setattr(server, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=EMPTY_FEED)
+
+    mock_http(respond)
+    params = {"search_query": "all:mock", "sortBy": sort_by, "sortOrder": order}
+    await server._query_atom(params)
+    now[0] += 61
+    await server._query_atom(params)
+    assert len(calls) == (1 if fresh_at_61 else 2)
+    now[0] += 301
+    await server._query_atom(params)
+    assert len(calls) == (2 if fresh_at_61 else 3)
+
+
+@pytest.mark.asyncio
+async def test_atom_cache_is_bounded_and_evicts_oldest(mock_http, monkeypatch):
+    monkeypatch.setattr(server, "ATOM_CACHE_SIZE", 2, raising=False)
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=EMPTY_FEED)
+
+    mock_http(respond)
+    for query in ["one", "two", "three"]:
+        await server._query_atom({"search_query": query})
+    assert len(server._atom_cache) == 2
+    await server._query_atom({"search_query": "one"})
+    assert len(calls) == 4
+    assert len(server._atom_cache) == 2
+
+
+@pytest.mark.asyncio
+async def test_atom_cache_does_not_share_mutable_results(mock_http):
+    from tests.test_server import _entry, _feed
+
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=_feed(_entry()))
+
+    mock_http(respond)
+    params = {"search_query": "all:mock"}
+    first = await server._query_atom(params)
+    title = first.papers[0].title
+    first.papers[0].title = "changed"
+    first.papers.clear()
+    second = await server._query_atom(params)
+    assert second.papers[0].title == title
+    second.papers[0].title = "changed again"
+    assert (await server._query_atom(params)).papers[0].title == title
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failure", ["http", "xml", "transport"])
+@pytest.mark.asyncio
+async def test_atom_failures_are_not_cached(failure, mock_http):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            if failure == "transport":
+                raise httpx.ConnectError("mock failure", request=request)
+            return httpx.Response(404 if failure == "http" else 200, text="not XML")
+        return httpx.Response(200, text=EMPTY_FEED)
+
+    mock_http(respond)
+    with pytest.raises(ValueError):
+        await fetch("atom")
+    await fetch("atom")
+    await fetch("atom")
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_mention_cache_is_bounded_normalized_and_expires(monkeypatch):
+    now, calls = [100.0], []
+    monkeypatch.setattr(server, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(server, "MENTION_CACHE_SIZE", 2, raising=False)
+    monkeypatch.setattr(server, "MENTION_DEBOUNCE", 0.0)
+    monkeypatch.setattr(server, "_mention_blocked_until", 0.0)
+
+    async def search(query):
+        calls.append(query)
+        return server.SearchResult(query=query, total_results=0, papers=[])
+
+    async def mention(query):
+        return await server.search_mentions(server.OpenAIMentionSearchParams(query=query), None)
+
+    monkeypatch.setattr(server, "search", search)
+    await mention("Alpha")
+    await mention(" alpha ")
+    assert calls == ["Alpha"]
+    await mention("Beta")
+    await mention("Gamma")
+    assert len(server._mention_cache) == 2
+    await mention("Alpha")
+    assert calls == ["Alpha", "Beta", "Gamma", "Alpha"]
+    now[0] += 301
+    await mention("Alpha")
+    assert len(calls) == 5
+    assert len(server._mention_cache) == 2

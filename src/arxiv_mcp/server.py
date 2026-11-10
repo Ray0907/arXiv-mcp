@@ -8,7 +8,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Optional
+from typing import Optional, TypeVar
 
 import httpx
 from mcp.server import MCPServer
@@ -33,12 +33,35 @@ openai_extensions = OpenAIExtensions()
 
 MENTION_MIN_CHARS = 3  # ChatGPT sends one query per keystroke
 MENTION_TTL = 300.0
+MENTION_CACHE_SIZE = 128
 MENTION_TIMEOUT = 8.0
 MENTION_DEBOUNCE = 0.5  # keystrokes arrive as separate calls; only the newest one searches
 MENTION_COOLDOWN = 15.0  # pause after an arXiv error (429), instead of hammering it
 _mention_seq = 0
 _mention_blocked_until = 0.0
-_mention_cache: dict[str, tuple[float, list[ResourceLink]]] = {}  # ponytail: unbounded, add LRU if it grows
+_mention_cache: dict[str, tuple[float, list[ResourceLink]]] = {}
+
+_CacheKey = TypeVar("_CacheKey")
+_CacheValue = TypeVar("_CacheValue")
+
+
+def _cache_get(cache: dict[_CacheKey, tuple[float, _CacheValue]], key: _CacheKey) -> Optional[_CacheValue]:
+	hit = cache.get(key)
+	if hit is not None:
+		if time.monotonic() < hit[0]:
+			return hit[1]
+		del cache[key]
+	return None
+
+
+def _cache_put(
+	cache: dict[_CacheKey, tuple[float, _CacheValue]], key: _CacheKey,
+	value: _CacheValue, ttl: float, max_size: int,
+) -> None:
+	cache.pop(key, None)
+	cache[key] = (time.monotonic() + ttl, value)
+	while len(cache) > max_size:
+		del cache[next(iter(cache))]
 
 
 # Must be registered before MCPServer is constructed.
@@ -50,9 +73,9 @@ async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIM
 	if len(query) < MENTION_MIN_CHARS:
 		return OpenAIMentionSearchResult(items=[])
 	key = query.lower()
-	hit = _mention_cache.get(key)
-	if hit and time.monotonic() - hit[0] < MENTION_TTL:
-		return OpenAIMentionSearchResult(items=hit[1])
+	hit = _cache_get(_mention_cache, key)
+	if hit is not None:
+		return OpenAIMentionSearchResult(items=hit)
 	_mention_seq += 1
 	seq = _mention_seq
 	await asyncio.sleep(MENTION_DEBOUNCE)
@@ -71,7 +94,7 @@ async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIM
 		)
 		for paper in result.papers[:10]
 	]
-	_mention_cache[key] = (time.monotonic(), items)
+	_cache_put(_mention_cache, key, items, MENTION_TTL, MENTION_CACHE_SIZE)
 	return OpenAIMentionSearchResult(items=items)
 
 
@@ -125,6 +148,10 @@ _NS = {
 }
 _VERSION_RE = re.compile(r"v\d+$")
 MAX_PAGE_SIZE = 50
+ATOM_TTL = 300.0
+ATOM_RECENT_TTL = 60.0
+ATOM_CACHE_SIZE = 128
+_atom_cache: dict[tuple[tuple[str, str], ...], tuple[float, SearchResult]] = {}
 
 # search_advanced / search argument -> (API field prefix, always a phrase)
 _FIELD_PREFIXES = {"title": ("ti", False), "abstract": ("abs", False), "author": ("au", True), "category": ("cat", False)}
@@ -231,16 +258,23 @@ async def _query_atom(params: dict[str, str], page: int = 1, page_size: int = 25
 	page = max(page, 1)
 	page_size = max(1, min(page_size, MAX_PAGE_SIZE))
 	request_params = {**params, "start": str((page - 1) * page_size), "max_results": str(page_size)}
+	key = tuple(sorted(request_params.items()))
+	hit = _cache_get(_atom_cache, key)
+	if hit is not None:
+		return hit.model_copy(deep=True)
 
 	response = await _get(URL_EXPORT, params=request_params, timeout=TIMEOUT)
 	papers, total = _parse_atom(response.text)
-	return SearchResult(
+	result = SearchResult(
 		query=params.get("search_query") or params.get("id_list", ""),
 		total_results=total,
 		papers=papers,
 		page=page,
 		page_size=page_size,
 	)
+	recent = params.get("sortBy") in {"submittedDate", "lastUpdatedDate"} and params.get("sortOrder") == "descending"
+	_cache_put(_atom_cache, key, result.model_copy(deep=True), ATOM_RECENT_TTL if recent else ATOM_TTL, ATOM_CACHE_SIZE)
+	return result
 
 
 def _sort_params(sort_by: str) -> dict[str, str]:
