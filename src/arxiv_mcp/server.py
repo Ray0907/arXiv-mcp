@@ -1,5 +1,11 @@
 """arXiv MCP Server - Main server implementation."""
 
+if __name__ == "__main__":
+	# Delegate before creating caches or registering tools under a second module name.
+	from arxiv_mcp.server import main
+	main()
+	raise SystemExit
+
 import argparse
 import asyncio
 import re
@@ -20,6 +26,7 @@ from openai_mcp_extensions import (
 	OpenAIMentionSearchResult,
 )
 
+from .metadata import get_papers
 from .models import (
 	ARXIV_CATEGORIES,
 	SORT_OPTIONS,
@@ -431,6 +438,9 @@ async def get_paper(id_or_url: str) -> Paper:
 	return paper
 
 
+mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})(get_papers)
+
+
 def _content_id(id_or_url: str) -> str:
 	id_or_url = id_or_url.strip()
 	if id_or_url.startswith(('https://', 'http://')):
@@ -564,7 +574,3 @@ def main():
 		mcp.run(transport="streamable-http", host=args.host, port=args.port, streamable_http_path="/mcp")
 	else:
 		mcp.run(transport="stdio")
-
-
-if __name__ == "__main__":
-	main()

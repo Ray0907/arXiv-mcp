@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `get_papers(ids)` for one-request batches of up to 50 IDs, with explicit missing IDs.
+
 - Include optional primary category, comment, journal reference, DOI and feed version in paper metadata;
   omit these fields when unavailable.
 

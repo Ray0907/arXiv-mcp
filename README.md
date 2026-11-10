@@ -50,6 +50,16 @@ Get detailed information about a specific arXiv paper. Optional `primary_categor
 |----------|------|----------|-------------|
 | `id_or_url` | string | Yes | arXiv ID (e.g., '2301.00001') or full URL |
 
+### `get_papers`
+Look up 1–50 IDs or arXiv URLs in a single `id_list` API request. Returns `papers` in request
+order and `missing_ids` for IDs absent from the response (including unavailable/withdrawn papers).
+A withdrawn paper with metadata is still returned. Invalid IDs or an out-of-range batch size fail
+locally. Exact duplicates are collapsed; legacy pinned IDs use latest metadata, as in `get_paper`.
+
+| Argument | Type | Required | Description |
+|----------|------|----------|-------------|
+| `ids` | list of strings | Yes | 1–50 arXiv IDs or URLs |
+
 ### `get_content`
 Validate the paper ID locally (no HTTP request), then return an `arxiv://` MCP resource link. Clients read the link through `resources/read`; only that read fetches the canonical PDF through Jina Reader. Paper text is never embedded in the tool result. Upstream failures, including a missing PDF (HTTP 404), surface as readable resource-read errors rather than tool-validation errors. A server-backed custom URI is used because MCP does not require every client to fetch external `https://` resource links directly.
 
@@ -166,7 +176,7 @@ pi mcp add arxiv -- uv --directory /path/to/arXiv-mcp run arxiv-mcp
 pi mcp list
 ```
 
-`pi mcp list` should show `arxiv: connected, 7 tools`. Tools are exposed through code mode by default; add
+`pi mcp list` should show `arxiv: connected` with the available tools. Tools are exposed through code mode by default; add
 `--exposure direct` to `pi mcp add` to expose each tool directly. A project-level server (`-l`) is ignored
 until you trust the project in pi.
 

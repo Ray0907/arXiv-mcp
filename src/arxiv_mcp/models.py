@@ -23,6 +23,13 @@ class Paper(BaseModel):
 	version: Optional[int] = Field(default=None, exclude_if=lambda v: v is None, description="Version number from the feed ID")
 
 
+class PaperBatch(BaseModel):
+	"""Batch metadata with explicit IDs absent from the API response."""
+
+	papers: list[Paper]
+	missing_ids: list[str]
+
+
 class SearchResult(BaseModel):
 	"""Search result containing papers and metadata."""
 
