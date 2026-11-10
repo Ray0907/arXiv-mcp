@@ -79,6 +79,9 @@ List all common arXiv categories with their codes and names.
 - Versioned IDs (`2301.00001v2`) are looked up as given. The API rejects versioned legacy IDs
   (`hep-th/9901001v1`), so the version is dropped for those.
 - Dates in results are ISO timestamps, e.g. `2017-06-12T17:57:34Z`.
+- arXiv and Jina transport failures surface as readable errors. GET requests retry once on HTTP
+  429, 503 or 406, using `Retry-After` (seconds or HTTP date, capped at 10 seconds; default 1 second).
+  Total deadlines include rate-limit and retry waits: 30 seconds for arXiv, 60 seconds for Jina.
 
 ## Installation
 

@@ -4,6 +4,8 @@
 
 - Read full paper text from canonical arXiv PDF URLs through Jina, not abstract pages.
 - Reject malformed paper IDs and traversal/encoded-path URLs before making content requests.
+- Report transport failures clearly; retry GETs once on HTTP 429/503/406 with capped `Retry-After`
+  and total deadlines, preserving arXiv request spacing without duplicate throttle waits.
 
 ## v0.5.0
 

@@ -7,6 +7,7 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import httpx
@@ -81,6 +82,7 @@ URL_EXPORT = "https://export.arxiv.org/api/query"
 URL_JINA = "https://r.jina.ai"
 _ARXIV_URL_PREFIXES = (f"{URL_BASE}/", "https://www.arxiv.org/")
 TIMEOUT = 30.0
+MAX_RETRY_AFTER = 10.0
 
 
 # New style 2301.00001, legacy hep-th/9901001 or math.GT/0309136; optional vN; bare, arXiv:-prefixed, or in an abs/pdf URL.
@@ -94,7 +96,8 @@ _ARXIV_ID_RE = re.compile(
 
 def _http_error(exc: httpx.HTTPStatusError) -> ValueError:
 	code = exc.response.status_code
-	return ValueError(f"arXiv returned HTTP {code}. Try adjusting your query or try again later.")
+	service = "Jina Reader" if exc.request.url.host == "r.jina.ai" else "arXiv"
+	return ValueError(f"{service} returned HTTP {code}. Try adjusting your query or try again later.")
 
 
 def extract_paper_id(url: str) -> Optional[str]:
@@ -177,22 +180,59 @@ async def _throttle() -> None:
 		_last_request = time.monotonic()
 
 
+def _retry_delay(response: httpx.Response) -> float:
+	value = response.headers.get("Retry-After", "1")
+	try:
+		delay = int(value)
+	except ValueError:
+		try:
+			delay = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+		except (ValueError, TypeError, OverflowError):
+			delay = 1
+	return max(0, min(delay, MAX_RETRY_AFTER))
+
+
+async def _get(
+	url: str, *, params: Optional[dict[str, str]] = None, timeout: float, stream: bool = False,
+) -> httpx.Response:
+	"""GET only; the deadline includes throttle, body reads and one status retry."""
+	service = "arXiv" if url == URL_EXPORT else "Jina Reader"
+	async def request() -> httpx.Response:
+		async with httpx.AsyncClient(
+			timeout=timeout, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
+		) as client:
+			for attempt in range(2):
+				if url == URL_EXPORT:
+					await _throttle()
+				if stream:
+					async with client.stream("GET", url, params=params) as response:
+						pass  # validation only; do not consume a paper body
+				else:
+					response = await client.get(url, params=params)
+				if attempt == 0 and response.status_code in {429, 503, 406}:
+					await asyncio.sleep(_retry_delay(response))
+					continue
+				response.raise_for_status()
+				return response
+
+	try:
+		return await asyncio.wait_for(request(), timeout=timeout)
+	except httpx.HTTPStatusError as exc:
+		raise _http_error(exc) from exc
+	except httpx.TransportError as exc:
+		reason = "request timed out" if isinstance(exc, httpx.TimeoutException) else "could not be reached"
+		raise ValueError(f"{service} {reason}. Try again later.") from exc
+	except asyncio.TimeoutError as exc:
+		raise ValueError(f"{service} request exceeded its {timeout:g}-second time limit. Try again later.") from exc
+
+
 async def _query_atom(params: dict[str, str], page: int = 1, page_size: int = 25) -> SearchResult:
 	"""Call the arXiv Atom API; `params` holds search_query/id_list/sortBy/sortOrder."""
 	page = max(page, 1)
 	page_size = max(1, min(page_size, MAX_PAGE_SIZE))
 	request_params = {**params, "start": str((page - 1) * page_size), "max_results": str(page_size)}
 
-	await _throttle()
-	try:
-		async with httpx.AsyncClient(
-			timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True
-		) as client:
-			response = await client.get(URL_EXPORT, params=request_params)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
-
+	response = await _get(URL_EXPORT, params=request_params, timeout=TIMEOUT)
 	papers, total = _parse_atom(response.text)
 	return SearchResult(
 		query=params.get("search_query") or params.get("id_list", ""),
@@ -367,12 +407,7 @@ def _jina_url(id_or_url: str) -> str:
 async def paper_content(id_or_url: str) -> str:
 	"""Read the full text of an arXiv paper through Jina Reader."""
 	jina_url = _jina_url(id_or_url)
-	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT * 2) as client:
-			response = await client.get(jina_url)
-			response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
+	response = await _get(jina_url, timeout=TIMEOUT * 2)
 	return response.text
 
 
@@ -391,12 +426,7 @@ async def get_content(id_or_url: str) -> ResourceLink:
 		Resource link to the paper's full text in markdown format
 	"""
 	jina_url = _jina_url(id_or_url)
-	try:
-		async with httpx.AsyncClient(timeout=TIMEOUT * 2) as client:
-			async with client.stream("GET", jina_url) as response:
-				response.raise_for_status()
-	except httpx.HTTPStatusError as exc:
-		raise _http_error(exc) from exc
+	await _get(jina_url, timeout=TIMEOUT * 2, stream=True)
 
 	return ResourceLink(
 		name="arXiv paper content",
