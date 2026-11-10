@@ -350,3 +350,116 @@ async def test_mention_cache_is_bounded_normalized_and_expires(monkeypatch):
     await mention("Alpha")
     assert len(calls) == 5
     assert len(server._mention_cache) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_content_is_local_only(monkeypatch):
+    def unexpected_client(**kwargs):
+        pytest.fail("get_content made an HTTP request")
+
+    monkeypatch.setattr(httpx, "AsyncClient", unexpected_client)
+    link = await server.get_content("hep-th/9901001v1")
+    assert str(link.uri) == "arxiv://content/hep-th%2F9901001v1"
+    assert link.mime_type == "text/markdown"
+
+
+@pytest.mark.parametrize("paper_id", ["1706.03762", "hep-th/9901001v1"])
+@pytest.mark.asyncio
+async def test_resource_reads_fetch_once_and_keep_resource_link_flow(paper_id, mock_http):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text="# Mock full paper\n\n## Mock section\nBody.")
+
+    mock_http(respond)
+    result = await server.mcp.call_tool("get_content", {"id_or_url": paper_id})
+    assert calls == []
+    assert result.structured_content is None
+    link = result.content[0]
+    first = await server.mcp.read_resource(link.uri)
+    second = await server.mcp.read_resource(link.uri)
+    assert first[0].content == second[0].content == "# Mock full paper\n\n## Mock section\nBody."
+    assert len(calls) == 1
+    assert str(calls[0].url) == f"https://r.jina.ai/https://arxiv.org/pdf/{paper_id}"
+
+
+@pytest.mark.asyncio
+async def test_content_cache_normalizes_aliases_but_keeps_versions_distinct(mock_http):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=f"# Mock paper {len(calls)}")
+
+    mock_http(respond)
+    first = await server.paper_content("1706.03762")
+    assert await server.paper_content("https://www.arxiv.org/abs/1706.03762") == first
+    assert await server.paper_content("arXiv:1706.03762") == first
+    v1 = await server.paper_content("1706.03762v1")
+    assert await server.paper_content("https://arxiv.org/pdf/1706.03762v1.pdf") == v1
+    v2 = await server.paper_content("1706.03762v2")
+    assert len({first, v1, v2}) == 3
+    assert len(calls) == 3
+    assert set(server._content_cache) == {"1706.03762", "1706.03762v1", "1706.03762v2"}
+
+
+@pytest.mark.asyncio
+async def test_content_cache_has_longer_ttl_for_versioned_ids(mock_http, monkeypatch):
+    now, calls = [100.0], []
+    monkeypatch.setattr(server, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=f"# Mock revision {len(calls)}")
+
+    mock_http(respond)
+    latest = await server.paper_content("1706.03762")
+    pinned = await server.paper_content("1706.03762v1")
+    now[0] += 3601
+    assert await server.paper_content("1706.03762") != latest
+    assert await server.paper_content("1706.03762v1") == pinned
+    assert len(calls) == 3
+    now[0] += 86401
+    assert await server.paper_content("1706.03762v1") != pinned
+    await server.paper_content("1706.03762")
+    assert len(calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_content_cache_is_bounded(mock_http, monkeypatch):
+    monkeypatch.setattr(server, "CONTENT_CACHE_SIZE", 2, raising=False)
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text="# Mock paper")
+
+    mock_http(respond)
+    for paper_id in ["1706.03762", "1706.03762v1", "1706.03762v2"]:
+        await server.paper_content(paper_id)
+    assert len(server._content_cache) == 2
+    await server.paper_content("1706.03762")
+    assert len(calls) == 4
+    assert len(server._content_cache) == 2
+
+
+@pytest.mark.parametrize("failure", ["http", "transport"])
+@pytest.mark.asyncio
+async def test_content_failures_are_not_cached(failure, mock_http):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            if failure == "transport":
+                raise httpx.ReadTimeout("mock failure", request=request)
+            return httpx.Response(404)
+        return httpx.Response(200, text="# Mock recovered paper")
+
+    mock_http(respond)
+    with pytest.raises(ValueError):
+        await server.paper_content("1706.03762")
+    assert await server.paper_content("1706.03762") == "# Mock recovered paper"
+    assert await server.paper_content("1706.03762") == "# Mock recovered paper"
+    assert len(calls) == 2

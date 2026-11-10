@@ -161,15 +161,8 @@ async def test_get_content_returns_jina_resource_link(monkeypatch, id_or_url, re
     jina_url = "https://r.jina.ai/https://arxiv.org/pdf/2301.00001"
     requests = []
 
-    class UnreadableStream(httpx.AsyncByteStream):
-        async def __aiter__(self):
-            raise AssertionError("validation request body was read")
-            yield b""  # pragma: no cover
-
     def respond(request):
         requests.append((request.method, str(request.url)))
-        if len(requests) == 1:
-            return httpx.Response(200, stream=UnreadableStream())
         return httpx.Response(200, text="full paper text")
 
     async_client = httpx.AsyncClient
@@ -178,7 +171,7 @@ async def test_get_content_returns_jina_resource_link(monkeypatch, id_or_url, re
 
     result = await mcp.call_tool("get_content", {"id_or_url": id_or_url})
 
-    assert requests == [("GET", jina_url)]
+    assert requests == []
     assert result.structured_content is None
     assert len(result.content) == 1
     assert isinstance(result.content[0], ResourceLink)
@@ -187,19 +180,21 @@ async def test_get_content_returns_jina_resource_link(monkeypatch, id_or_url, re
 
     resource = await mcp.read_resource(result.content[0].uri)
     assert resource[0].content == "full paper text"
-    assert requests == [("GET", jina_url), ("GET", jina_url)]
+    assert requests == [("GET", jina_url)]
 
 
 @pytest.mark.asyncio
 async def test_get_content_stream_raises_on_http_failure(monkeypatch):
-    from arxiv_mcp.server import get_content
+    from mcp.shared.exceptions import MCPError
+    from arxiv_mcp.server import get_content, mcp
 
     async_client = httpx.AsyncClient
     transport = httpx.MockTransport(lambda request: httpx.Response(404, request=request))
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: async_client(transport=transport))
 
-    with pytest.raises(ValueError, match="404"):
-        await get_content("2301.00001")
+    link = await get_content("2301.00001")
+    with pytest.raises(MCPError, match="Jina Reader returned HTTP 404"):
+        await mcp.read_resource(link.uri)
 
 
 @pytest.mark.asyncio

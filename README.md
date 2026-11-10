@@ -50,7 +50,9 @@ Get detailed information about a specific arXiv paper.
 | `id_or_url` | string | Yes | arXiv ID (e.g., '2301.00001') or full URL |
 
 ### `get_content`
-Validate an arXiv paper through a streamed Jina Reader request, then return an `arxiv://` MCP resource link. Clients read the link through `resources/read`; the paper text is fetched only then and is never embedded in the tool result. A server-backed custom URI is used because MCP does not require every client to fetch external `https://` resource links directly.
+Validate the paper ID locally (no HTTP request), then return an `arxiv://` MCP resource link. Clients read the link through `resources/read`; only that read fetches the canonical PDF through Jina Reader. Paper text is never embedded in the tool result. Upstream failures, including a missing PDF (HTTP 404), surface as readable resource-read errors rather than tool-validation errors. A server-backed custom URI is used because MCP does not require every client to fetch external `https://` resource links directly.
+
+Full text is cached per process by paper ID, keeping versions distinct: up to 32 papers, expiring after 1 hour for unversioned IDs or 24 hours for pinned `vN` IDs. Abstract/PDF URL aliases share the same cached text. PDF availability and Jina extraction quality still depend on the upstream services, especially for withdrawn papers.
 
 | Argument | Type | Required | Description |
 |----------|------|----------|-------------|

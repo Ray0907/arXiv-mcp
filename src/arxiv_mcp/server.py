@@ -12,7 +12,8 @@ from typing import Optional, TypeVar
 
 import httpx
 from mcp.server import MCPServer
-from mcp.types import ResourceLink
+from mcp.shared.exceptions import MCPError
+from mcp.types import INTERNAL_ERROR, ResourceLink
 from openai_mcp_extensions import (
 	OpenAIExtensions,
 	OpenAIMentionSearchParams,
@@ -152,6 +153,10 @@ ATOM_TTL = 300.0
 ATOM_RECENT_TTL = 60.0
 ATOM_CACHE_SIZE = 128
 _atom_cache: dict[tuple[tuple[str, str], ...], tuple[float, SearchResult]] = {}
+CONTENT_TTL = 3600.0
+CONTENT_VERSION_TTL = 86400.0
+CONTENT_CACHE_SIZE = 32
+_content_cache: dict[str, tuple[float, str]] = {}
 
 # search_advanced / search argument -> (API field prefix, always a phrase)
 _FIELD_PREFIXES = {"title": ("ti", False), "abstract": ("abs", False), "author": ("au", True), "category": ("cat", False)}
@@ -220,10 +225,11 @@ def _retry_delay(response: httpx.Response) -> float:
 
 
 async def _get(
-	url: str, *, params: Optional[dict[str, str]] = None, timeout: float, stream: bool = False,
+	url: str, *, params: Optional[dict[str, str]] = None, timeout: float,
 ) -> httpx.Response:
 	"""GET only; the deadline includes throttle, body reads and one status retry."""
 	service = "arXiv" if url == URL_EXPORT else "Jina Reader"
+
 	async def request() -> httpx.Response:
 		async with httpx.AsyncClient(
 			timeout=timeout, headers={"User-Agent": USER_AGENT}, follow_redirects=True,
@@ -231,11 +237,7 @@ async def _get(
 			for attempt in range(2):
 				if url == URL_EXPORT:
 					await _throttle()
-				if stream:
-					async with client.stream("GET", url, params=params) as response:
-						pass  # validation only; do not consume a paper body
-				else:
-					response = await client.get(url, params=params)
+				response = await client.get(url, params=params)
 				if attempt == 0 and response.status_code in {429, 503, 406}:
 					await asyncio.sleep(_retry_delay(response))
 					continue
@@ -422,7 +424,7 @@ async def get_paper(id_or_url: str) -> Paper:
 	return paper
 
 
-def _jina_url(id_or_url: str) -> str:
+def _content_id(id_or_url: str) -> str:
 	id_or_url = id_or_url.strip()
 	if id_or_url.startswith(('https://', 'http://')):
 		if not any(id_or_url.startswith(prefix) for prefix in _ARXIV_URL_PREFIXES):
@@ -430,7 +432,23 @@ def _jina_url(id_or_url: str) -> str:
 	id_arxiv = extract_paper_id(id_or_url)
 	if not id_arxiv:
 		raise ValueError(f"Could not extract arXiv ID from: {id_or_url}")
-	return f"{URL_JINA}/{URL_BASE}/pdf/{id_arxiv}"
+	return id_arxiv
+
+
+def _jina_url(id_or_url: str) -> str:
+	return f"{URL_JINA}/{URL_BASE}/pdf/{_content_id(id_or_url)}"
+
+
+async def paper_content(id_or_url: str) -> str:
+	"""Read and cache full text by canonical ID, keeping pinned revisions separate."""
+	id_arxiv = _content_id(id_or_url)
+	hit = _cache_get(_content_cache, id_arxiv)
+	if hit is not None:
+		return hit
+	response = await _get(_jina_url(id_arxiv), timeout=TIMEOUT * 2)
+	ttl = CONTENT_VERSION_TTL if _VERSION_RE.search(id_arxiv) else CONTENT_TTL
+	_cache_put(_content_cache, id_arxiv, response.text, ttl, CONTENT_CACHE_SIZE)
+	return response.text
 
 
 @mcp.resource(
@@ -438,11 +456,13 @@ def _jina_url(id_or_url: str) -> str:
 	name="arXiv paper content",
 	mime_type="text/markdown",
 )
-async def paper_content(id_or_url: str) -> str:
+async def read_paper_content(id_or_url: str) -> str:
 	"""Read the full text of an arXiv paper through Jina Reader."""
-	jina_url = _jina_url(id_or_url)
-	response = await _get(jina_url, timeout=TIMEOUT * 2)
-	return response.text
+	try:
+		return await paper_content(id_or_url)
+	except ValueError as exc:
+		# The SDK masks ordinary resource exceptions, including readable upstream errors.
+		raise MCPError(INTERNAL_ERROR, str(exc)) from exc
 
 
 @mcp.tool(
@@ -451,7 +471,8 @@ async def paper_content(id_or_url: str) -> str:
 )
 async def get_content(id_or_url: str) -> ResourceLink:
 	"""
-	Get the full text content of an arXiv paper using Jina Reader.
+	Return a full-text resource link after local ID validation, without HTTP.
+	Read the resource to fetch text through Jina Reader; upstream errors surface on read.
 
 	Args:
 		id_or_url: arXiv paper ID (e.g., '2301.00001') or full arXiv URL
@@ -459,9 +480,7 @@ async def get_content(id_or_url: str) -> ResourceLink:
 	Returns:
 		Resource link to the paper's full text in markdown format
 	"""
-	jina_url = _jina_url(id_or_url)
-	await _get(jina_url, timeout=TIMEOUT * 2, stream=True)
-
+	_content_id(id_or_url)
 	return ResourceLink(
 		name="arXiv paper content",
 		uri=f"arxiv://content/{urllib.parse.quote(id_or_url, safe='')}",

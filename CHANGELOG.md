@@ -8,6 +8,8 @@
   and total deadlines, preserving arXiv request spacing without duplicate throttle waits.
 - Bound Atom and mention caches to 128 entries each, with TTL expiry and shorter freshness windows
   for newest-first searches. Keep paginated/versioned lookups distinct and cached results isolated.
+- Make `get_content` local-only; fetch once on resource read and cache up to 32 full texts by ID
+  (1 hour unversioned, 24 hours versioned). Preserve `arxiv://` links and readable resource errors.
 
 ## v0.5.0
 
