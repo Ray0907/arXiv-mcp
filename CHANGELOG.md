@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.7.0
+
+**Packaging:**
+- Published on PyPI as `arxiv-mcp-lean` (the name `arxiv-mcp` belongs to an unrelated project);
+  install with `uvx arxiv-mcp-lean`. The `arxiv-mcp` command is kept, so existing configurations still work
 
 **Improvements:**
 - Full text now tries the arXiv HTML rendering through Jina first, which gives `read_paper` a fuller
@@ -9,7 +13,7 @@
   the chosen source is remembered per paper ID so refetches never switch text mid-read
 
 **Documentation:**
-- README: `uvx --from git+https://github.com/Ray0907/arXiv-mcp arxiv-mcp` install without cloning,
+- README: `uvx` install without cloning,
   and a security note that paper text is untrusted content
 
 ## v0.6.0

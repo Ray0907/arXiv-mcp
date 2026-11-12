@@ -1,6 +1,6 @@
 [project]
-name = "arxiv-mcp"
-version = "0.6.0"
+name = "arxiv-mcp-lean"
+version = "0.7.0"
 description = "A Model Context Protocol server for arXiv paper search and retrieval"
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,6 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
+arxiv-mcp-lean = "arxiv_mcp.server:main"
 arxiv-mcp = "arxiv_mcp.server:main"
 
 [project.urls]
@@ -38,6 +39,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/arxiv_mcp"]
+
+[tool.hatch.build.targets.sdist]
+# Explicit list: untracked local notes in the checkout must never reach PyPI.
+only-include = ["src", "README.md", "CHANGELOG.md", "LICENSE"]
 
 [tool.uv]
 dev-dependencies = [

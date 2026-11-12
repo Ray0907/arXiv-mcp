@@ -178,22 +178,24 @@ returned through `arxiv://` resources and `read_paper`, and the server itself ne
 ### With uvx (no clone)
 
 ```bash
-uvx --from git+https://github.com/Ray0907/arXiv-mcp arxiv-mcp
+uvx arxiv-mcp-lean
 ```
 
-MCP clients start it for you; use `uvx` as the command with
-`--from git+https://github.com/Ray0907/arXiv-mcp arxiv-mcp` as the arguments, for example:
+MCP clients start it for you; use `uvx` as the command, for example:
 
 ```json
 {
   "mcpServers": {
     "arxiv": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/Ray0907/arXiv-mcp", "arxiv-mcp"]
+      "args": ["arxiv-mcp-lean"]
     }
   }
 }
 ```
+
+The PyPI package is `arxiv-mcp-lean`; the PyPI name `arxiv-mcp` is an unrelated project. To run the
+unreleased `main` branch instead: `uvx --from git+https://github.com/Ray0907/arXiv-mcp arxiv-mcp-lean`.
 
 ### Using uv from a clone
 
