@@ -27,6 +27,10 @@ async def main():
             assert sc_again == sc, "cached result must match (case/space-insensitive)"
             assert dt < 0.2, f"second call should hit cache, took {dt:.2f}s"
             print(f"short-query empty OK; cache hit {dt*1000:.0f}ms")
+            outline = await s.call_tool("read_paper", {"id_or_url": "1706.03762", "max_chars": 4000})
+            text = outline.content[0].text
+            assert "Scaled Dot-Product Attention" in text, "outline should come from arXiv HTML headings"
+            print("HTML outline OK:", text.count("- section:"), "sections")
             print("OK")
 
 asyncio.run(main())

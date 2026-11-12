@@ -3,6 +3,7 @@
 import httpx
 import pytest
 
+import arxiv_mcp.content as content
 import arxiv_mcp.server as server
 from tests.test_entrypoint import execute_module
 
@@ -21,7 +22,7 @@ async def test_runpy_resource_and_bounded_read_share_one_fetch(monkeypatch):
     await namespace["read_paper_content"]("2401.00001")
     result = await namespace["read_paper"]("2401.00001", section="Methods")
     assert result == "# Methods\nSynthetic methods.\n"
-    assert calls == [server._jina_url("2401.00001")]
+    assert calls == [content._jina_url("2401.00001")]
     assert started == [server.mcp]
     assert namespace["_content_cache"] is server._content_cache
     assert namespace["_atom_cache"] is server._atom_cache

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+import arxiv_mcp.content as content
 import arxiv_mcp.server as server
 
 
@@ -51,7 +52,7 @@ EMPTY_FEED = '<feed xmlns="http://www.w3.org/2005/Atom" />'
     ],
 )
 def test_jina_url_rebuilds_pdf_target(value, paper_id):
-    assert server._jina_url(value) == f"https://r.jina.ai/https://arxiv.org/pdf/{paper_id}"
+    assert content._jina_url(value) == f"https://r.jina.ai/https://arxiv.org/pdf/{paper_id}"
 
 
 @pytest.mark.parametrize(
@@ -428,7 +429,7 @@ async def test_content_cache_has_longer_ttl_for_versioned_ids(mock_http, monkeyp
 
 @pytest.mark.asyncio
 async def test_content_cache_is_bounded(mock_http, monkeypatch):
-    monkeypatch.setattr(server, "CONTENT_CACHE_SIZE", 2, raising=False)
+    monkeypatch.setattr(content, "CONTENT_CACHE_SIZE", 2, raising=False)
     calls = []
 
     def respond(request):

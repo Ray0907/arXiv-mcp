@@ -27,6 +27,7 @@ from openai_mcp_extensions import (
 
 from .metadata import _parse_atom, clean_text, export_bibtex, get_papers
 from .reading import read_paper
+from .content import _content_cache, _content_source, paper_content  # noqa: F401
 from .discovery import get_recent
 from . import graph
 from .graph import get_references, get_citations
@@ -161,10 +162,6 @@ ATOM_TTL = 300.0
 ATOM_RECENT_TTL = 60.0
 ATOM_CACHE_SIZE = 128
 _atom_cache: dict[tuple[tuple[str, str], ...], tuple[float, SearchResult]] = {}
-CONTENT_TTL = 3600.0
-CONTENT_VERSION_TTL = 86400.0
-CONTENT_CACHE_SIZE = 32
-_content_cache: dict[str, tuple[float, str]] = {}
 
 # search_advanced / search argument -> (API field prefix, always a phrase)
 _FIELD_PREFIXES = {"title": ("ti", False), "abstract": ("abs", False), "author": ("au", True), "category": ("cat", False)}
@@ -432,22 +429,6 @@ def _content_id(id_or_url: str) -> str:
 	if not id_arxiv:
 		raise ValueError(f"Could not extract arXiv ID from: {id_or_url}")
 	return id_arxiv
-
-
-def _jina_url(id_or_url: str) -> str:
-	return f"{URL_JINA}/{URL_BASE}/pdf/{_content_id(id_or_url)}"
-
-
-async def paper_content(id_or_url: str) -> str:
-	"""Read and cache full text by canonical ID, keeping pinned revisions separate."""
-	id_arxiv = _content_id(id_or_url)
-	hit = _cache_get(_content_cache, id_arxiv)
-	if hit is not None:
-		return hit
-	response = await _get(_jina_url(id_arxiv), timeout=TIMEOUT * 2)
-	ttl = CONTENT_VERSION_TTL if _VERSION_RE.search(id_arxiv) else CONTENT_TTL
-	_cache_put(_content_cache, id_arxiv, response.text, ttl, CONTENT_CACHE_SIZE)
-	return response.text
 
 
 @mcp.resource(

@@ -24,7 +24,7 @@ def execute_module(monkeypatch):
         except SystemExit as exc:
             assert exc.code in (None, 0)
             namespace = vars(server)
-    return namespace["paper_content"].__globals__, started
+    return namespace["read_paper_content"].__globals__, started
 
 
 @pytest.mark.asyncio
