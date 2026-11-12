@@ -1,5 +1,7 @@
 """Full-text sourcing: arXiv HTML first, PDF fallback, one source per paper ID."""
 
+import time
+
 import httpx
 
 from .reading import _split_sections
@@ -18,22 +20,28 @@ def _jina_url(id_or_url: str, kind: str = "pdf") -> str:
 
 HTML_MIN_CHARS = 2000
 HTML_MIN_SECTIONS = 2
+HTML_RETRY_MIN_TIMEOUT = 5.0
 CONTENT_SOURCE_SIZE = 1024
 # Paper ID -> "html" | "pdf". Outlives _content_cache so a refetch never changes the text under a caller's selectors.
 _content_source: dict[str, str] = {}
 
 
 async def _html_text(id_arxiv: str) -> str:
-	"""Jina can answer HTTP 200 with an image caption or an arXiv error page, so judge the content."""
+	"""Jina answers HTTP 200 with a ~300-byte image caption on the first fetch of a paper it has not cached,
+	and with the full page on the next, so judge the content and retry that case once."""
 	from . import server
 
-	try:
-		text = (await server._get(_jina_url(id_arxiv, "html"), timeout=server.TIMEOUT)).text
-	except httpx.HTTPError:  # _get leaves DecodingError and TooManyRedirects unwrapped
-		raise ValueError("Jina Reader could not read the arXiv HTML page. Try again later.") from None
-	if len(text) < HTML_MIN_CHARS or len(_split_sections(text)) < HTML_MIN_SECTIONS:
-		raise ValueError("The arXiv HTML page is no longer usable for this paper. Try again later.")
-	return text
+	start = time.monotonic()
+	for attempt in range(2):
+		# The retry spends what is left of the HTML budget, but never less than HTML_RETRY_MIN_TIMEOUT.
+		timeout = server.TIMEOUT if attempt == 0 else max(server.TIMEOUT - (time.monotonic() - start), HTML_RETRY_MIN_TIMEOUT)
+		try:
+			text = (await server._get(_jina_url(id_arxiv, "html"), timeout=timeout)).text
+		except httpx.HTTPError:  # _get leaves DecodingError and TooManyRedirects unwrapped
+			raise ValueError("Jina Reader could not read the arXiv HTML page. Try again later.") from None
+		if len(text) >= HTML_MIN_CHARS and len(_split_sections(text)) >= HTML_MIN_SECTIONS:
+			return text
+	raise ValueError("The arXiv HTML page is no longer usable for this paper. Try again later.")
 
 
 async def _fetch_content(id_arxiv: str, source: str) -> str:

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.1
+
+**Fixes:**
+- First read of a paper Jina Reader has not cached now gets the arXiv HTML outline. Jina answers the
+  first HTML fetch of such a paper with a ~300-byte image-caption stub and the full page on the next,
+  so a stub is retried once before falling back to the PDF (previously the stub sent the paper to the
+  PDF, pinned for the rest of the process). Status and transport errors are still not retried. The retry
+  spends what is left of the 30-second HTML budget, at least 5 seconds, so the worst case is 35 seconds
+  of HTML attempts before the PDF fallback's own 60 seconds
+
 ## v0.7.0
 
 **Packaging:**

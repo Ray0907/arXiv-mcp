@@ -1,6 +1,6 @@
 [project]
 name = "arxiv-mcp-lean"
-version = "0.7.0"
+version = "0.7.1"
 description = "A Model Context Protocol server for arXiv paper search and retrieval"
 readme = "README.md"
 license = { text = "MIT" }

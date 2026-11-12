@@ -1,4 +1,4 @@
-import asyncio, json, time
+import asyncio, json, re, time
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -31,6 +31,16 @@ async def main():
             text = outline.content[0].text
             assert "Scaled Dot-Product Attention" in text, "outline should come from arXiv HTML headings"
             print("HTML outline OK:", text.count("- section:"), "sections")
+            # A deep page of date-sorted results is a paper Jina has most likely never cached.
+            cold = await s.call_tool("search", {"query": "learning", "sort_by": "date_desc", "page": 60, "page_size": 3})
+            cold_ids = [p["id_arxiv"] for p in cold.structured_content["papers"]]
+            numbered = 0
+            for paper_id in cold_ids:
+                text = (await s.call_tool("read_paper", {"id_or_url": paper_id, "max_chars": 6000})).content[0].text
+                has_subsections = bool(re.search(r"- section:\d+: \d+\.\d+ ", text))
+                numbered += has_subsections
+                print("cold", paper_id, "numbered subsections in outline:", has_subsections)
+            assert numbered >= 2, "first read of cold papers should give HTML outlines with numbered subsections"
             print("OK")
 
 asyncio.run(main())
