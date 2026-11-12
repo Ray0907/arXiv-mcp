@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+**Improvements:**
+- Full text now tries the arXiv HTML rendering through Jina first, which gives `read_paper` a fuller
+  heading outline; stubs, error pages and failures fall back to the PDF path with its existing
+  deadline, retry and error messages (the HTML attempt adds its own 30-second budget);
+  the chosen source is remembered per paper ID so refetches never switch text mid-read
+
+**Documentation:**
+- README: `uvx --from git+https://github.com/Ray0907/arXiv-mcp arxiv-mcp` install without cloning,
+  and a security note that paper text is untrusted content
+
 ## v0.6.0
 
 **Breaking Changes:**
