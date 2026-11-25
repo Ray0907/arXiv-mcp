@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.0
+
+**New Features:**
+- Publish the bundled `arxiv` skill over MCP (SEP-2640) on protocol `2026-07-28`.
+  It explains tool order, arXiv citations, and how to handle untrusted paper text.
+  Existing tools and paper resources are unchanged.
+
 ## v0.7.1
 
 **Fixes:**

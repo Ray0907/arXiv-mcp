@@ -1,10 +1,21 @@
 import asyncio, json, re, time
 from pathlib import Path
-from mcp import ClientSession, StdioServerParameters
+from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
+from pydantic import TypeAdapter
 
 async def main():
     params = StdioServerParameters(command="uv", args=["run", "arxiv-mcp"], cwd=str(Path(__file__).resolve().parent.parent))
+    # Modern discovery and the legacy initialize flow need separate stdio connections.
+    async with stdio_client(params) as (r, w):
+        async with ClientSession(r, w) as s:
+            discovery = await s.discover()
+            assert s.protocol_version == "2026-07-28"
+            assert discovery.capabilities.extensions["io.modelcontextprotocol/skills"] == {}
+            skills = await s.send_request(types.Request[dict, str](method="skills/list", params={}), TypeAdapter(dict))
+            assert skills["resultType"] == "complete"
+            assert [skill["uri"] for skill in skills["skills"]] == ["skill://arxiv/SKILL.md"]
+            print(f"skills/list ({s.protocol_version}): {skills['skills'][0]['uri']}")
     async with stdio_client(params) as (r, w):
         async with ClientSession(r, w) as s:
             init = await s.initialize()

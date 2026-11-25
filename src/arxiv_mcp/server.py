@@ -39,6 +39,8 @@ from .models import (
 	SearchResult,
 )
 
+from .skills import SkillsExtension
+
 openai_extensions = OpenAIExtensions()
 
 
@@ -109,7 +111,7 @@ async def search_mentions(params: OpenAIMentionSearchParams, context) -> OpenAIM
 	return OpenAIMentionSearchResult(items=items)
 
 
-mcp = MCPServer("arXiv-server", extensions=[openai_extensions])
+mcp = MCPServer("arXiv-server", extensions=[openai_extensions, SkillsExtension()])
 
 URL_BASE = "https://arxiv.org"
 URL_EXPORT = "https://export.arxiv.org/api/query"
